@@ -1,8 +1,7 @@
 import Foundation
 
-/// Protocole de contrôle Nothing (RFCOMM « NT LINK »). Voir Protocol.md.
 enum NT {
-    /// UUID du service SDP « NT LINK » (AEAC4A03-DFF5-498F-843A-34487CF133EB).
+
     static let serviceUUID: [UInt8] = [0xAE, 0xAC, 0x4A, 0x03, 0xDF, 0xF5, 0x49, 0x8F,
                                        0x84, 0x3A, 0x34, 0x48, 0x7C, 0xF1, 0x33, 0xEB]
 
@@ -22,7 +21,7 @@ enum NT {
         static let setBassBoost: UInt16 = 0xF051
         static let setSpatial: UInt16 = 0xF052
         static let setGestures: UInt16 = 0xF003
-        /// Starts the head-orientation stream (`E015`, ~9.5 Hz, until the channel closes).
+
         static let startHeadStream: UInt16 = 0xC058
         static let notifyANC: UInt16 = 0xE003
         static let notifyHeadPose: UInt16 = 0xE015
@@ -36,7 +35,7 @@ struct Frame {
 }
 
 enum Codec {
-    /// CRC16 Modbus (polynôme réfléchi 0xA001, init 0xFFFF).
+
     static func crc16(_ bytes: some Sequence<UInt8>) -> UInt16 {
         var crc: UInt16 = 0xFFFF
         for b in bytes {
@@ -56,7 +55,6 @@ enum Codec {
     }
 }
 
-/// Reassembles frames from the RFCOMM byte stream (resynchronises on 0x55 and validates the CRC).
 struct FrameParser {
     private var buffer: [UInt8] = []
 
@@ -68,8 +66,7 @@ struct FrameParser {
         while true {
             guard let start = buffer.firstIndex(of: 0x55) else { buffer.removeAll(); break }
             if start > 0 { buffer.removeFirst(start) }
-            // The control bytes differ by message kind (`60 01` for replies and most events, `20 03` for the
-            // head-tracking stream), so only the CRC decides whether a candidate frame is real.
+
             if buffer.count < 10 { break }
             let len = Int(buffer[5]) | Int(buffer[6]) << 8
             if len > 2048 { buffer.removeFirst(); continue }
@@ -86,8 +83,6 @@ struct FrameParser {
         return frames
     }
 }
-
-// MARK: - Noise control
 
 enum ANCKind: CaseIterable {
     case anc, transparency, off
@@ -125,12 +120,6 @@ enum ANCState {
     }
 }
 
-// MARK: - Equalizer
-
-/// EQ presets as shown in the app. The headphone does not expose the curves of its built-in presets
-/// (only the custom profile can be read), so each preset here is an explicit 8-band curve that the
-/// app writes to the custom slot (device preset 5). "Balanced" uses the device's own preset 0.
-/// Bands: 55 / 110 / 220 / 440 / 1320 / 3300 / 6600 / 13200 Hz.
 enum EQPreset: CaseIterable {
     case balanced, bass, treble, voice, custom
 
@@ -144,7 +133,6 @@ enum EQPreset: CaseIterable {
         }
     }
 
-    /// Curve in dB; `nil` for Custom (the user's own saved curve).
     var gains: [Float]? {
         switch self {
         case .balanced: [0, 0, 0, 0, 0, 0, 0, 0]
@@ -155,16 +143,15 @@ enum EQPreset: CaseIterable {
         }
     }
 
-    /// Device preset values: 0 = balanced, 5 = custom curve (the others are accepted but not used).
     static let deviceBalanced: UInt8 = 0
     static let deviceCustom: UInt8 = 5
 }
 
 struct EQBand: Identifiable, Equatable {
     var id: Int
-    var type: UInt8   // 0 = low-shelf, 1 = peaking, 2 = high-shelf
-    var gain: Float   // dB
-    var freq: Float   // Hz
+    var type: UInt8
+    var gain: Float
+    var freq: Float
     var q: Float
 }
 
@@ -202,11 +189,6 @@ struct EQProfile: Equatable {
     }
 }
 
-// MARK: - Spatial audio
-
-/// `C04F` → `[on, headTracking]` ; `F052` prend le même format.
-/// Le firmware ignore (en accusant réception) les écritures d'EQ non plat ou de basses
-/// tant que l'audio spatial est actif : voir `HeadphoneModel.setSpatial`.
 struct SpatialState: Equatable {
     var on: Bool
     var headTracking: Bool
@@ -219,17 +201,13 @@ struct SpatialState: Equatable {
     func encode() -> [UInt8] { [on ? 1 : 0, headTracking ? 1 : 0] }
 }
 
-// MARK: - Gestures
-
-/// Une ligne de la table `C018` : `[side, button, gesture, action]` (4 octets).
-/// Sur le Headphone (1), `side` vaut toujours 0x06 (appareil unique).
 struct GestureBinding: Identifiable, Equatable {
     var side: UInt8
     var button: UInt8
     var gesture: UInt8
     var action: UInt8
 
-    var id: Int { Int(button) << 8 | Int(gesture) }
+    var id: Int { Int(side) << 16 | Int(button) << 8 | Int(gesture) }
 
     static func decodeTable(_ p: [UInt8]) -> [GestureBinding] {
         guard let count = p.first else { return [] }
@@ -242,17 +220,21 @@ struct GestureBinding: Identifiable, Equatable {
         return rows
     }
 
-    /// Payload `F003` : `[01, side, button, gesture, action]`.
     func encodeSet() -> [UInt8] { [1, side, button, gesture, action] }
 
-    // Libellés : 0x01/0x0A et les gestes 0x01/0x07 sont déduits de la table réelle
-    // (roller / bouton, appui / triple appui) ; les actions 08/09/16 sont mesurées
-    // sur d'autres modèles (AVRCP), 0B est supposée être « contrôle du bruit ».
     static func controlName(_ b: UInt8) -> String {
         switch b {
         case 0x01: String(localized: "Roller")
         case 0x0A: String(localized: "Button")
         default: String(format: String(localized: "Control 0x%02X"), b)
+        }
+    }
+
+    static func sideName(_ side: UInt8) -> String? {
+        switch side {
+        case 0x02: String(localized: "Left earbud")
+        case 0x03: String(localized: "Right earbud")
+        default: nil
         }
     }
 
@@ -281,34 +263,30 @@ struct GestureBinding: Identifiable, Equatable {
     }
 }
 
-// MARK: - Device settings (low latency, codec, dual connection, adaptive ANC, in-ear detection, find)
-
 extension NT.Cmd {
     static let readLowLatency: UInt16 = 0xC041
     static let readCodec: UInt16 = 0xC029
     static let readDualConnection: UInt16 = 0xC027
     static let readAdaptiveANC: UInt16 = 0xC055
-    /// Feature table: `count, (featureId, flag) × count`.
+
     static let readFeatureFlags: UInt16 = 0xC00E
     static let setLowLatency: UInt16 = 0xF040
     static let setCodec: UInt16 = 0xF01C
     static let setDualConnection: UInt16 = 0xF01A
     static let setAdaptiveANC: UInt16 = 0xF059
     static let setFeatureFlag: UInt16 = 0xF004
-    /// Rings the headphone. No read counterpart.
+
     static let findHeadphone: UInt16 = 0xF002
 }
 
-/// Payload helpers for the simple one-byte device settings. Pure functions, easy to unit test.
 enum DeviceSetting {
-    /// One-byte on/off read (`C027`, `C055`): any non-zero value is on.
+
     static func decodeFlag(_ p: [UInt8]) -> Bool? {
         p.first.map { $0 != 0 }
     }
 
     static func encodeFlag(_ on: Bool) -> [UInt8] { [on ? 1 : 0] }
 
-    /// Low latency is `1` = on, `2` = off (not 0/1); anything else is unknown.
     static func decodeLowLatency(_ p: [UInt8]) -> Bool? {
         switch p.first {
         case 1: true
@@ -320,10 +298,8 @@ enum DeviceSetting {
     static func encodeLowLatency(_ on: Bool) -> [UInt8] { [on ? 1 : 2] }
 }
 
-/// `C029` / `F01C`. The firmware ACKs any value 0...3 but only 0 and 2 mean something on this headphone.
-/// Changing it makes the headphone drop the RFCOMM link to renegotiate A2DP.
 enum AudioCodec: UInt8, CaseIterable {
-    case standard = 0   // AAC / SBC
+    case standard = 0
     case ldac = 2
 
     static func decode(_ p: [UInt8]) -> AudioCodec? { p.first.flatMap(AudioCodec.init(rawValue:)) }
@@ -338,7 +314,6 @@ enum AudioCodec: UInt8, CaseIterable {
     }
 }
 
-/// The `C00E` feature table: `count, (featureId, flag) × count`. `F004` writes one entry at a time.
 struct DeviceFeatureTable: Equatable {
     struct Entry: Equatable {
         var id: UInt8
@@ -347,10 +322,8 @@ struct DeviceFeatureTable: Equatable {
 
     var entries: [Entry]
 
-    /// Feature `01` is in-ear detection. It is the only one the app writes.
     static let inEarDetection: UInt8 = 0x01
 
-    /// Tolerates a truncated table (keeps the complete pairs) but rejects an empty payload.
     static func decode(_ p: [UInt8]) -> DeviceFeatureTable? {
         guard let count = p.first else { return nil }
         var entries: [Entry] = []
@@ -368,16 +341,34 @@ struct DeviceFeatureTable: Equatable {
 
     var inEarDetectionOn: Bool? { flag(Self.inEarDetection) }
 
-    /// `F004` payload for a single flag: `[count = 1, featureId, value]`. Other flags are never sent.
     static func encodeSet(feature: UInt8, on: Bool) -> [UInt8] { [1, feature, on ? 1 : 0] }
 
     static func encodeInEarDetection(on: Bool) -> [UInt8] { encodeSet(feature: inEarDetection, on: on) }
 }
 
-/// `F002 [side, on]`. `side` is `06` for a single-unit headphone (as for battery, wear and gestures);
-/// not verified for this command.
 enum FindMyHeadphone {
     static let side: UInt8 = 0x06
 
     static func payload(on: Bool) -> [UInt8] { [side, on ? 1 : 0] }
+}
+
+struct BatteryReading: Equatable, Identifiable {
+    enum Part: UInt8 {
+        case left = 2, right = 3, charger = 4, headphone = 6
+    }
+
+    var part: Part
+    var level: Int
+    var charging: Bool
+    var id: UInt8 { part.rawValue }
+
+    static func decode(_ payload: [UInt8]) -> [BatteryReading] {
+        guard let count = payload.first else { return [] }
+        return (0..<Int(count)).compactMap { index in
+            let offset = 1 + index * 2
+            guard offset + 1 < payload.count, let part = Part(rawValue: payload[offset]) else { return nil }
+            let raw = payload[offset + 1]
+            return BatteryReading(part: part, level: Int(raw & 0x7F), charging: raw & 0x80 != 0)
+        }
+    }
 }

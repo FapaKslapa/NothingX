@@ -223,3 +223,22 @@ stayed at 44.1 kHz. The app therefore does not offer it.
 `F002 [06, 01]` makes the headphone ring (side `06` = the single unit), `F002 [06, 00]` stops it. Verified with
 the headphone off the head: it sounds, and the app's 2 s pulse then stops it. There is no read command.
 
+
+
+## Earbuds (Nothing Ear (a)) — observed
+
+Read-only observations from one Ear (a); the left and right assignment is an assumption, not confirmed.
+
+| Item | Observed | Status |
+|---|---|---|
+| Battery `C007` | `count, (id, level) × count`, bit 7 of `level` = charging | verified format |
+| Battery ids | `02` left bud, `03` right bud, `04` case (the case appears only when the lid is open) | assumed, 02 and 03 swap unverified |
+| Device info `C006` | one block per unit (ids 2, 3, 4) with firmware, serial and MAC | verified |
+| Custom EQ `C04D` | all zeros (no bands): the earbuds expose no custom curve | verified |
+| Spatial audio `C04F` | no reply | verified unsupported |
+| Gestures `C018` | rows `[side, control, gesture, action]` with `side` 02 or 03 and `control` 01 | verified format, side names assumed |
+| Gesture codes | `02` single press, `03` double, `07` triple, `09` press and hold; actions `09` play/pause, `08` next, `16` previous, `01` none | matches the Headphone (a) table |
+| Adaptive ANC `C055`, in-ear `C00E` | no reply | verified unsupported |
+
+Controls on the Headphone (a) (roller, roller click, slider, front button) send standard Bluetooth media
+commands: pressing them produced no NT LINK frame, so the gesture rows cannot be matched to them by listening.
