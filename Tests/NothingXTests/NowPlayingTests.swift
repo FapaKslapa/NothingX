@@ -25,4 +25,17 @@ final class NowPlayingTests: XCTestCase {
         let youtube = NowPlayingItem(source: .youtube, title: "t", artist: "a", state: .unknown, viaMediaKeys: true)
         XCTAssertTrue(service.canControl(youtube))
     }
+
+    func testYouTubeProbeCarriesStateAndPosition() {
+        let probe = NowPlayingProviders.parseProbe("playing,83,240")
+        XCTAssertEqual(probe.state, .playing)
+        XCTAssertEqual(probe.position, 83)
+        XCTAssertEqual(probe.duration, 240)
+        XCTAssertEqual(NowPlayingProviders.parseProbe("unknown").position, nil)
+    }
+
+    func testProgressTimeFormat() {
+        XCTAssertEqual(ProgressSlider.format(75), "1:15")
+        XCTAssertEqual(ProgressSlider.format(-3), "0:00")
+    }
 }

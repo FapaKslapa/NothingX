@@ -27,6 +27,11 @@ struct NowPlayingTile: View {
                     }
                     Spacer(minLength: 0)
                 }
+                if item.canSeek, let duration = item.duration {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        ProgressSlider(position: service.position(of: item, at: context.date), duration: duration) { service.seek(to: $0) }
+                    }
+                }
                 HStack(spacing: 16) {
                     Spacer(minLength: 0)
                     RoundButton(symbol: "backward.fill", size: 38, label: "Previous track") { service.send(.previous) }

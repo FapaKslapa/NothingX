@@ -30,6 +30,9 @@ struct NowPlayingItem: Identifiable, Equatable {
     var state: State
     var artworkURL: URL?
     var viaMediaKeys = false
+    var position: Double?
+    var duration: Double?
 
     var id: String { source.rawValue }
+    var canSeek: Bool { !viaMediaKeys && (duration ?? 0) > 0 }
 }
