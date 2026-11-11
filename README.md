@@ -1,305 +1,164 @@
-<h1 align="center">NOTHING&nbsp;X&nbsp;for&nbsp;Mac</h1>
+# Nothing X for Mac
 
-<p align="center">
-  A lightweight, native macOS companion for the <b>Nothing Headphone (1)</b>.<br/>
-  Noise control, spatial audio, equalizer and battery — without reaching for your phone.
-</p>
+A native macOS companion for Nothing headphones and earbuds: battery, noise control, equalizer, gestures,
+spatial audio, a now-playing panel and a menu bar control, in a frosted-glass interface inspired by Nothing OS 5.
 
-<p align="center">
-  <img alt="platform" src="https://img.shields.io/badge/platform-macOS%2014.2%2B-000000?style=flat-square">
-  <img alt="swift" src="https://img.shields.io/badge/Swift-SwiftUI-D71921?style=flat-square">
-  <img alt="status" src="https://img.shields.io/badge/status-work%20in%20progress-555555?style=flat-square">
-  <img alt="license" src="https://img.shields.io/badge/license-MIT-000000?style=flat-square">
-</p>
+![Dashboard](docs/screenshots/dashboard.jpg)
 
-> **Unofficial.** This project is not affiliated with, endorsed by, or sponsored by
-> Nothing Technology Limited. "Nothing" and "Nothing X" are trademarks of their respective owner.
-> The protocol was worked out by probing a headphone I own, and from public references.
+> **Unofficial.** This project is not affiliated with, endorsed by, or sponsored by Nothing Technology Limited.
+> "Nothing" and "Nothing X" are trademarks of their respective owner.
 
----
+## Credits
 
-## Why
+This project is a fork of [Senooy/nothing-x-mac](https://github.com/Senooy/nothing-x-mac) and exists thanks to
+that work. The Bluetooth protocol reverse engineering, the RFCOMM transport, the frame codec, the equalizer
+engine, the Mac anchor spatial audio, the software equalizer for wired mode, the notification rules and the
+original application architecture all come from the upstream project, released under the MIT license. The
+protocol notes in [`Protocol.md`](Protocol.md) build on the same public references the upstream author used.
 
-Nothing X is only available on iOS and Android. If your headphones live on your Mac all day,
-changing the ANC mode or the EQ means picking up a phone. This app talks to the headphones
-directly from macOS.
+## What this fork adds
 
-## Features
+### A new interface
 
-| | Status |
+- A frosted-glass design system: translucent cards, a wallpaper background, soft shadows, one tile language
+  used everywhere (settings, gestures, device options, media access).
+- Liquid Glass on macOS 26 and later, with a material fallback on macOS 14.2 and later.
+- A choosable accent color and a choosable device color.
+- A fully resizable window, up to full screen, with floating controls that stay put while the content scrolls.
+- English, French and Italian.
+- A new app icon and a new menu bar glyph.
+
+### Nothing Ear (a) and Nothing Headphone (a)
+
+- Per-model behavior: controls a device does not support are hidden instead of shown disabled
+  (no custom equalizer or spatial audio on the earbuds, no find-my on earbuds).
+- Per-unit battery: left earbud, right earbud and charging case each get their own ring.
+- Per-side gestures for earbuds, with tap glyphs and action icons.
+- Product pictures for each device and color.
+
+![Settings](docs/screenshots/settings.jpg)
+
+### Devices
+
+- A devices screen listing every Nothing device paired with the Mac, with connect, switch and forget.
+- Event-driven connection detection instead of constant polling.
+- The device list appears on its own when nothing is connected.
+
+![Devices](docs/screenshots/devices.jpg)
+
+### Now playing
+
+- Shows what is playing in Spotify and Music with cover art, title and artist.
+- Shows YouTube from Chrome, Safari, Zen and Firefox, with the video thumbnail where the browser allows it.
+- Play, pause, next and previous from the app, and from the menu bar panel.
+- Access is requested one app at a time, from the first-launch tour or from Settings. Nothing is read until
+  you allow it.
+
+### Menu bar
+
+A glass panel instead of a plain menu: battery, noise control, now playing, and shortcuts to the app and its settings.
+
+### Equalizer
+
+A Nothing X style equalizer: a live response curve computed from the band filters, eight pill sliders with
+dotted rails, and a readout of the selected band. Presets, file import and export from the upstream project are kept.
+
+### First-launch tour
+
+Redone in the new style, with a step that asks for the media permissions, so the app is complete from the first
+launch.
+
+![Tour](docs/screenshots/tour.jpg)
+
+### Engineering
+
+- The main screen is split into small, single-purpose views.
+- Settings live inside the app window; the separate macOS Settings window is gone.
+- New logic is covered by unit tests: equalizer response, battery decoding, gesture identity, device filtering,
+  now-playing parsing and the tour flow.
+- A release workflow publishes a signed update feed and a DMG on every tag.
+
+## Supported devices
+
+| Device | Status |
 |---|---|
-| Battery level, charging state, firmware, serial number | working |
-| Noise control: ANC (High / Mid / Low / Adaptive), Transparency, Off | working |
-| Spatial audio on the headphone, with head tracking | working |
-| **Mac anchor**: the app renders the Mac's audio as binaural sound fixed in front of you and follows your head, like AirPods on a Mac | working, in testing |
-| Equalizer presets (Balanced, More bass, More treble, Voice) shown as 8-band curves — the bars move when you pick one | working |
-| Custom 8-band equalizer, saved locally | working |
-| EQ files: import an AutoEq / Equalizer APO `ParametricEQ.txt` (or a `GraphicEQ:` line) into the custom EQ, export the current curve | working, not yet tried on the headphone |
-| **Wired mode**: with the USB-C cable plugged in the equalizer keeps working (the Mac equalizes what it plays, same presets and sliders, same place); the rest is dimmed | working |
-| Gestures: view and remap the customizable controls, restore the original table | experimental |
-| Menu bar item: battery and quick noise-control switching | working |
-| Notifications: low battery (20 % or 10 %) and headphone connected, configured in Settings (⌘,) | working |
-| English UI, French when macOS is set to French | working |
-| Device settings: low latency, dual connection, adaptive ANC, in-ear detection (write and read-back checked on the headphone) | working |
-| Find my headphone (2 s pulse, asks you to take the headphone off first) | working |
-| Wired (USB) detection ("Wired (USB)" in the top bar and the menu bar), optional "use as the Mac's output" | detection verified, output switching in testing |
+| Nothing Headphone (a) | verified: battery, noise control, equalizer, gestures, device settings |
+| Nothing Ear (a) | verified: battery per unit, noise control, gestures |
+| Nothing Headphone (1) | supported by the upstream project |
 
-Settings changed from the headphone's own buttons are picked up within a few seconds, and the app
-reconnects by itself when the headphone comes back.
+Other Nothing devices that speak the same protocol may work. The observations behind each model are in
+[`Protocol.md`](Protocol.md).
 
-## Stack
+## Install
 
-- **Swift + SwiftUI**, native macOS app — a few MB, no web runtime.
-- **IOBluetooth** for the Bluetooth Classic RFCOMM link.
-- Design language inspired by Nothing: black canvas, mono labels, dot-matrix display, a single red accent.
+1. Download `NothingX-<version>.dmg` from the [latest release](https://github.com/FapaKslapa/NothingX/releases/latest).
+2. Open it and drag **Nothing X** to the Applications folder.
+3. The app is not notarized. The first time, right-click it and choose **Open**, or run
+   `xattr -dr com.apple.quarantine "/Applications/Nothing X.app"`.
 
-## How it talks to the headphones
+Updates arrive through the app itself ([Sparkle](https://sparkle-project.org)).
 
-The headphones expose a vendor RFCOMM service named **NT LINK**
-(UUID `AEAC4A03-DFF5-498F-843A-34487CF133EB`). The app finds it through SDP, opens the
-channel and exchanges small framed packets:
+## Permissions
 
-```
-55 60 01 | cmd (LE16) | len (LE16) | opId | payload | CRC16 (LE)
-```
-
-The full, evolving reference — frame layout, command families, ANC modes, EQ payloads, spatial
-audio, gestures, and what was verified versus only documented — lives in
-[`Protocol.md`](Protocol.md). If you own another Nothing device and want to help map it, that
-document is the place to start.
-
-## Download
-
-Grab `NothingX-<version>.dmg` from the [latest release](../../releases/latest), open it and drag
-**Nothing X.app** to the Applications folder. It is a universal build (Apple Silicon and Intel).
-
-The app is signed with a Developer ID certificate and notarized by Apple, so it opens normally.
-
-Or install it with [Homebrew](https://brew.sh):
-
-```bash
-brew tap Senooy/nothing-x https://github.com/Senooy/nothing-x-mac
-brew install --cask nothing-x
-```
-
-Updates come through the app itself ([Sparkle](https://sparkle-project.org)): it checks GitHub once a day
-(it asks on the second launch whether to check automatically), and the menu bar item has **Check for Updates…**.
-The cask is marked `auto_updates`, so `brew upgrade` leaves the app to Sparkle.
-
-## Requirements
-
-- macOS 14.2 or later (built with Xcode 27 / Swift 6.4)
-- A Nothing Headphone (1), paired and connected to your Mac
-- Bluetooth permission for the app, plus System Audio Recording for the Mac anchor mode and the software equalizer (macOS asks on first use)
+| Permission | Why | When it is asked |
+|---|---|---|
+| Bluetooth | reach the headphone | first-launch tour |
+| Notifications | low battery and connection alerts | when you switch an alert on |
+| Automation (Spotify, Music, Chrome, Safari) | show and control what plays | tour or Settings |
+| Accessibility and System Events | read the YouTube tab title in Zen and Firefox | tour or Settings |
+| System Audio Recording | Mac anchor and the wired-mode equalizer | when you switch them on |
 
 ## Build
+
+Requires macOS 14.2 or later and Xcode 26 or later (the Liquid Glass APIs need the macOS 26 SDK).
 
 ```bash
 ./build.sh
 open "build/Nothing X.app"
 ```
 
-`build.sh` compiles a universal (arm64 + x86_64) Swift package and assembles an ad-hoc signed `build/Nothing X.app`
-(set `SIGN_IDENTITY` to sign with another identity). It has to be a real app bundle: macOS only lets a process
-use Bluetooth if its `Info.plist` carries a Bluetooth usage description. The app is intentionally **not
-sandboxed** (RFCOMM access).
+`build.sh` produces an ad-hoc signed universal app. Sign with a stable identity to keep macOS permissions
+between rebuilds: `SIGN_IDENTITY="..." ./build.sh`. Run the tests with `swift test`.
 
-`release.sh` produces the signed, notarized and stapled DMG; see the header of the script for the one-time setup
-(a Developer ID certificate and a `notarytool` keychain profile). It then writes `build/appcast.xml`
-(`scripts/make-appcast.sh`, EdDSA-signed with the Sparkle key stored in the login keychain), bumps
-`Casks/nothing-x.rb` (`scripts/update-cask.sh`) and prints the `gh release` command that attaches the DMG
-**and** `appcast.xml` to the release.
+## Release
 
-Unit tests (EQ files, head pose filter, onboarding, notifications, software EQ): `swift test`.
-
-To force English on a French system:
-`open -n "build/Nothing X.app" --args -AppleLanguages "(en)"`.
+Push a tag that matches the app version, for example `v0.5.0`. The workflow in `.github/workflows/release.yml`
+runs the tests, builds the app, packages `NothingX-<version>.dmg`, signs the Sparkle feed and publishes both in a
+GitHub release. It needs one repository secret, `SPARKLE_PRIVATE_KEY`, the EdDSA key matching `SUPublicEDKey` in
+`Resources/Info.plist`.
 
 ## Project layout
 
 | Path | Purpose |
 |---|---|
-| `Sources/NothingX/Protocol.swift` | frame codec, CRC16, command ids, ANC / EQ / spatial / gesture models |
-| `Sources/NothingX/BluetoothLink.swift` | IOBluetooth transport: finds the headphone, resolves the channel via SDP, reconnects |
-| `Sources/NothingX/EQInterchange.swift`, `EQFileActions.swift` | AutoEq / Equalizer APO import and export (pure parser + serializer, and the Import / Export buttons) |
-| `Tests/NothingXTests/` | unit tests for the EQ file parser (`swift test`) |
-| `Sources/NothingX/SystemAudioTap.swift` | system audio capture shared by the Mac anchor and the software EQ (process tap, tap-only aggregate) |
-| `Sources/NothingX/EQAudioEngine.swift`, `SoftwareEQ.swift` | software equalizer for wired mode: engine, pure band mapping / headroom / policy |
-| `Sources/NothingX/HeadphoneModel.swift` | observable state, request/response matching, settings logic |
-| `Sources/NothingX/ContentView.swift`, `Theme.swift`, `BandSlider.swift` | Nothing-style UI |
-| `Sources/NothingX/NotificationService.swift`, `NotificationRules.swift` | notification permission and posting; pure threshold / hysteresis rules |
-| `Sources/NothingX/SettingsView.swift` | Settings window (⌘,), one view per section |
-| `Resources/` | `Info.plist`, `en` / `fr` localizations, app icon and menu bar glyph |
-| `tools/make-icons.swift` | regenerates `AppIcon.icns` and the menu bar glyph (the "Dot X" icon) |
-
-## EQ files
-
-**Import…** / **Export…** under the equalizer read and write the plain-text format used by
-[AutoEq](https://github.com/jaakkopasanen/AutoEq) and Equalizer APO (`ParametricEQ.txt`):
-
-```
-Preamp: -6.2 dB
-Filter 1: ON PK Fc 31 Hz Gain 2.4 dB Q 1.41
-Filter 2: ON LSC Fc 105 Hz Gain 4.5 dB Q 0.70
-```
-
-- `PK` is a peaking filter, `LSC` / `LS` / `LSQ` a low shelf, `HSC` / `HS` / `HSQ` a high shelf. `OFF` filters
-  are skipped; other types (low/high pass, notch...) are ignored with a warning. Decimal commas, missing
-  units, `BW Oct` instead of `Q` and a `GraphicEQ: 25 -3; 40 -2.5; ...` line (sampled at the 8 band centres
-  in log frequency) are accepted.
-- The headphone has exactly **8 bands**. With fewer filters the rest are 0 dB bands at the default
-  frequencies; with more, the 8 with the largest |gain| are kept and the warning says how many were dropped.
-  Gains are limited to ±12 dB (reported).
-- **Preamp is not applied**: the custom EQ payload has a global gain field, but what the firmware does with
-  it is unverified, so the preamp line is only reported. Keep an eye on clipping if a file boosts a lot.
-- Importing sends the curve like a manual edit (written, read back, switches to Custom). Note that the
-  shelf type, frequency and Q of the imported bands stay on the headphone; the preset buttons and
-  **Reset to zero** only change gains.
-
-## Mac anchor
-
-Pick **Mac anchor** under Spatial audio. The app captures everything the Mac plays (Core Audio process
-tap, muted at the source while the app runs), spatializes it with HRTF as two virtual speakers in front
-of you, and keeps them fixed while your head turns, using the headphone's motion sensor (~10 Hz,
-smoothed and extrapolated). The headphone's own spatial processing is switched off in this mode so the
-effect is not applied twice. Look at the Mac and press **Recenter** (also in the menu bar) if the image
-drifts. Yaw drift is also cancelled slowly by itself, but only while your head is still and close to the
-Mac direction, so looking at another screen never drags the anchor along. If the app quits or crashes, the normal system audio
-comes back on its own.
-
-## Wired mode
-
-Plugging the USB-C cable makes the headphone **turn Bluetooth off by design** (Nothing says so on its support
-page), and the Mac cannot reopen the link while the cable is in. The app cannot talk to the headphone then, so
-the window keeps the same layout and simply dims what is unavailable: noise control, battery, spatial audio,
-gestures and device settings. The top bar reads **Wired (USB)**; the physical buttons keep working on the
-headphone itself.
-
-**The equalizer keeps working**, in the same place with the same presets and sliders: while wired it drives a
-software equalizer run by the Mac. There is no switch: it starts by itself as soon as the curve changes the
-sound, like the headphone's own EQ, and then stays up until you unplug (stopping it mid-music would glitch, and a
-flat curve changes nothing). The same Core Audio process tap as the Mac anchor captures what the
-Mac plays (muted at the source while it runs, the app's own output excluded), an 8-band `AVAudioUnitEQ`
-(55 Hz … 13.2 kHz, peaking, Q = 1, ±12 dB) equalizes it, and the result goes to the headphone's USB output. The
-curve is saved locally (`UserDefaults`, `softeq.profile`); **Custom** is the same saved curve as the headphone's
-Custom preset, and EQ files import into it. It needs System Audio Recording permission the first time.
-
-- **Headroom**: the EQ's global gain is lowered by the largest band boost (a +6 dB bass curve plays 6 dB
-  quieter overall), so no single boosted band can clip. Neighbouring boosts overlap, so on full-scale material
-  the summed curve can still exceed 0 dB by a dB or two between them. Cuts cost no level.
-- Slider moves apply live; gain changes are ramped (1 dB per 10 ms) so preset jumps do not click.
-- Use the Mac's volume keys. Unplugging the cable stops the equalizer and releases the tap, so system audio comes
-  back on its own; on the next plug it starts again if the saved curve is not flat.
-- The Mac anchor needs the Bluetooth sensor stream, so it is not available while wired.
-- **Optional**: Settings › Wired mode › *Use as the Mac's output* (off by default). When on, the app makes the
-  headphone the Mac's sound output on plug and gives the previous output back on unplug. If you pick another
-  output yourself while it is plugged in, the app leaves your choice alone. macOS does not switch to a USB
-  headset by itself, hence the option.
-- Detection uses IOKit notifications (no polling); the output switch uses Core Audio.
-
-## Notifications and Settings
-
-Open **Settings** with ⌘, or from the menu bar item.
-
-**First launch**: a short tour in the main window explains the Bluetooth permission before macOS asks for it,
-waits for the headphone, offers the two notifications and introduces the Mac anchor. Every step can be skipped
-(**[Skip]** or Esc), and a skipped tour is not shown again. Replay it from Settings (Welcome › Show) or with
-**Show Welcome…** in the menu bar item. To see it again at launch: `defaults delete dev.younes.NothingX onboarding.completed`.
-
-- **Low battery**: on by default. Choose 20 % or 10 %. The alert fires once when the level reaches the
-  threshold while the headphone is not charging. It arms again only after the battery climbs more than
-  10 points above the threshold or the headphone is charged, so it never repeats on every reading.
-- **Headphone connected**: off by default. Fires when the headphone connects, but not for the connection
-  made in the first 8 seconds after the app launches.
-- The app never asks for notification permission by itself at launch. Permission is requested when you
-  switch an alert on (or from the onboarding). If macOS has it blocked, Settings says so and offers a
-  button that opens System Settings > Notifications.
-- Choices are stored in `UserDefaults` (`notify.connected`, `notify.lowBattery`,
-  `notify.lowBattery.threshold`). Notifications need the packaged `.app`; `swift run` has none.
+| `Sources/NothingX/Protocol.swift` | frame codec, CRC16, command ids, ANC, equalizer, spatial, gesture and battery models |
+| `Sources/NothingX/BluetoothLink.swift`, `DeviceLibrary.swift` | RFCOMM transport, connection events, paired device list |
+| `Sources/NothingX/HeadphoneModel.swift` | observable device state and settings logic |
+| `Sources/NothingX/Dashboard.swift` and the `*Card.swift` files | the main screen, one view per card |
+| `Sources/NothingX/GlassSurface.swift`, `TileChrome.swift`, `Theme.swift` | the glass design system |
+| `Sources/NothingX/NowPlaying*.swift`, `MediaPermissions.swift` | now-playing sources and the permissions behind them |
+| `Sources/NothingX/Onboarding*.swift` | the first-launch tour and its pure flow |
+| `Sources/NothingX/SettingsPanel.swift` and section files | in-app settings |
+| `Resources/` | `Info.plist`, localizations, icons, wallpaper and device pictures |
+| `tools/make-icons.swift` | regenerates the app icon and the menu bar glyph |
+| `Tests/NothingXTests/` | unit tests |
 
 ## Known limits
 
-- ANC level names (High / Mid / Low) follow the Nothing convention and were not confirmed by ear.
-- Mac anchor adds a little latency on top of Bluetooth (video may be slightly late), the sensor only reports
-  ~10 times a second, and the angle scale is an estimate (use the sensitivity slider).
-- Development builds signed ad hoc ask for Bluetooth permission again after every rebuild; sign with a
-  stable identity (`SIGN_IDENTITY="..." ./build.sh`) to avoid that.
-- Bluetooth permission: the app checks the macOS Bluetooth permission before touching IOBluetooth, so the
-  window opens right away. Until you answer the system prompt (which can appear on another display) it shows
-  "Waiting for Bluetooth permission…"; if access was denied it shows "Bluetooth access denied" with a link to
-  Privacy & Security › Bluetooth. Granting access later is picked up without restarting the app. To see the
-  prompt again: `tccutil reset Bluetooth dev.younes.NothingX`.
-- The headphone does not expose the curves of its built-in presets, so the app defines its own
-  (see `EQPreset` in `Protocol.swift`) and sends them through the custom EQ slot.
-- Gesture rewrites are accepted and read back by the headphone, but their effect on the physical
-  controls has not been verified.
+- Gesture rewrites are accepted and read back by the headphone, but their effect on the physical controls is
+  unverified, and the mapping of gesture rows to the roller, slider and button of the Headphone (a) is unknown.
+- Battery ids for left, right and case on the earbuds, and the left and right gesture sides, are assumptions
+  from a single device. See [`Protocol.md`](Protocol.md).
+- YouTube in Zen and Firefox shows the title only and uses the system media keys, which target whichever player
+  macOS considers active.
+- ANC level names follow the Nothing convention and were not confirmed by ear.
 
-## Contributing
+## Assets
 
-Pull requests are very welcome. The app only supports the **Nothing Headphone (1)** today because that is the
-only device its author owns, and the goal is to cover as many Nothing and CMF devices as possible. If you own
-another one, you are the person who can make that happen.
-
-You do not have to write Swift to help. An issue with your model, its firmware version, and whether the app
-finds and connects to it is already useful, and so is a note on which commands from
-[`Protocol.md`](Protocol.md) your device answers to.
-
-### Adding a new device
-
-1. **Open an issue first** with the device name, firmware version and what you have tried, so nobody
-   duplicates the work and we can agree on the approach.
-2. **Check what is shared.** Start from [`Protocol.md`](Protocol.md): the framing, CRC and command families
-   may be the same on your device, but that is only known for the Headphone (1). The public references listed
-   at the top of that file include notes on other models. Treat anything not confirmed on your hardware as
-   *documented*, not *verified*.
-3. **Find the right place in the code:**
-   - `Sources/NothingX/BluetoothLink.swift` finds the device (today: the first connected paired device whose
-     name contains "nothing", then its "NT LINK" service through SDP). A CMF product may need a different
-     match here.
-   - `Sources/NothingX/Protocol.swift` holds the frame codec, command ids and models (ANC modes, EQ,
-     gestures, settings). Per-model differences usually belong here, for example other ANC levels, a different
-     number of EQ bands, or a left and right `side` for earbuds instead of the single unit `06`.
-   - `Sources/NothingX/HeadphoneModel.swift` turns replies into state, and the views (`ContentView.swift`,
-     `DeviceSettingsView.swift`) should hide controls the device does not have rather than show broken ones.
-4. **Add tests** in `Tests/NothingXTests/` for any new parsing or encoding, in the style of `ProtocolTests.swift`.
-5. **Document it in `Protocol.md`**, in a section for your model, and keep the existing tags: **verified**
-   (written and read back on the device), **behaviour unverified** (accepted but the effect is not confirmed),
-   **documented** (from a public source, not tried). Please do not rewrite the Headphone (1) notes to fit
-   another device.
-6. **Say what you tested on** in the pull request: model, firmware, macOS version, and what works or does not.
-   A screenshot of the app with your device connected helps a lot.
-
-### Ground rules
-
-- Only test on hardware you own. Writing to a device can change its settings, so begin with reads, and add a
-  read-back check to every write.
-- Never commit serial numbers or Bluetooth addresses. They show up in the app and in logs, so check your
-  screenshots and captures before sharing them.
-- Build with `./build.sh` and run `swift test` before opening the pull request. The app has to run as a real
-  `.app` bundle (see [Build](#build)).
-- AI-assisted contributions are fine, as this project is one itself, as long as you have tested the change on
-  real hardware and say so.
-
-## Roadmap
-
-- [ ] Support other Nothing and CMF devices (see [Contributing](#contributing))
-- [x] Decode the transport and framing
-- [x] ANC, EQ preset and custom EQ read/write
-- [x] Core library: transport, protocol, model
-- [x] Main window (Nothing-style UI)
-- [x] Menu bar control
-- [x] Custom EQ editor
-- [x] Spatial audio and gestures
-- [ ] Verify gesture remapping on the physical controls
-- [x] Low latency, dual connection, adaptive ANC, in-ear detection (LDAC is not offered: macOS only plays SBC and AAC)
-- [x] App icon (Dot X) and a first release build
-- [x] Developer ID signing and notarization
-
-## Disclaimer
-
-Writing to a device you did not intend to modify can change its settings. This software is
-provided as is, without warranty. Use it on your own hardware, at your own risk.
+The product pictures in `Resources/Devices` and the wallpaper in `Resources/GlassBackground.jpg` are the
+property of their respective owners. They are included for this non-commercial fan project and will be removed
+on request.
 
 ## License
 
-[MIT](LICENSE)
+MIT, see [`LICENSE`](LICENSE). The original copyright notice of the upstream project is preserved.
