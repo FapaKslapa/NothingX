@@ -24,6 +24,7 @@ struct EQPanel: View {
                         onChange(band.id, $0)
                     } onEnd: {
                         onEnd()
+                        selected = nil
                     }
                     .frame(maxWidth: .infinity)
                 }
