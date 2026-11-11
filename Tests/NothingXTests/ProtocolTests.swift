@@ -3,13 +3,13 @@ import XCTest
 
 final class CodecTests: XCTestCase {
     func testCRC16ModbusCheckValue() {
-        // The standard CRC-16/MODBUS check value.
+
         XCTAssertEqual(Codec.crc16(Array("123456789".utf8)), 0x4B37)
         XCTAssertEqual(Codec.crc16([UInt8]()), 0xFFFF, "empty input is the init value")
     }
 
     func testEncodeReadFirmwareFrame() {
-        // C042 read, opId 1, no payload (vector computed independently of the Swift code).
+
         XCTAssertEqual(Codec.encode(cmd: NT.Cmd.readFirmware, opId: 1, payload: []),
                        [0x55, 0x60, 0x01, 0x42, 0xC0, 0x00, 0x00, 0x01, 0x61, 0x10])
     }
@@ -31,7 +31,7 @@ final class CodecTests: XCTestCase {
 }
 
 final class FrameParserTests: XCTestCase {
-    /// A frame with arbitrary control bytes (the head stream uses `55 20 03`), CRC computed by `Codec`.
+
     private func raw(control: [UInt8], cmd: UInt16, opId: UInt8, payload: [UInt8]) -> [UInt8] {
         let n = payload.count
         var out = control + [UInt8(cmd & 0xFF), UInt8(cmd >> 8), UInt8(n & 0xFF), UInt8(n >> 8), opId] + payload
@@ -96,7 +96,7 @@ final class FrameParserTests: XCTestCase {
     func testResyncAfterGarbageContainingStartBytes() {
         var p = FrameParser()
         let good = Codec.encode(cmd: 0x4007, opId: 4, payload: [9, 8])
-        // A fake complete header (starts with 0x55, bad CRC) precedes the real frame.
+
         let fake: [UInt8] = [0x55, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
         let frames = p.feed(fake + good)
         XCTAssertEqual(frames.map(\.cmd), [0x4007])
@@ -105,7 +105,7 @@ final class FrameParserTests: XCTestCase {
     func testGarbageOnlyDoesNotAccumulateOrProduceFrames() {
         var p = FrameParser()
         XCTAssertTrue(p.feed([UInt8](repeating: 0xAA, count: 5000)).isEmpty)
-        // The parser is still healthy afterwards.
+
         XCTAssertEqual(p.feed(Codec.encode(cmd: 0x4001, opId: 1, payload: [])).count, 1)
     }
 
@@ -128,7 +128,7 @@ final class FrameParserTests: XCTestCase {
     }
 
     func testKnownHeadStreamVector() {
-        // 55 20 03 E015 len 16, zero payload (vector computed independently of the Swift code).
+
         let hex = "55 20 03 15 E0 10 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 56 88"
         let bytes = hex.split(separator: " ").map { UInt8($0, radix: 16)! }
         var p = FrameParser()
@@ -142,7 +142,7 @@ final class FrameParserTests: XCTestCase {
         var bad = Codec.encode(cmd: 0x4007, opId: 1, payload: [1, 2, 3])
         bad[bad.count - 1] ^= 0xFF
         XCTAssertTrue(p.feed(bad).isEmpty)
-        // Corrupted payload byte, intact CRC.
+
         var bad2 = Codec.encode(cmd: 0x4007, opId: 1, payload: [1, 2, 3])
         bad2[9] ^= 0x01
         XCTAssertTrue(p.feed(bad2).isEmpty)
@@ -159,7 +159,7 @@ final class FrameParserTests: XCTestCase {
 
     func testOversizedLengthRejected() {
         var p = FrameParser()
-        // Declared length 0xFFFF: a parser that believed it would wait for 64 KB and swallow the next frames.
+
         let oversized: [UInt8] = [0x55, 0x60, 0x01, 0x07, 0x40, 0xFF, 0xFF, 0x01, 0x00, 0x00]
         let good = Codec.encode(cmd: 0x4008, opId: 2, payload: [4])
         let frames = p.feed(oversized + good)
@@ -205,12 +205,12 @@ final class EQProfileTests: XCTestCase {
         XCTAssertEqual(bytes.count, 6 + 8 * 13)
         XCTAssertEqual(bytes[0], 5)
         XCTAssertEqual(bytes[1], 8)
-        // -2.5 f32 LE = 0xC0200000
+
         XCTAssertEqual(Array(bytes[2..<6]), [0x00, 0x00, 0x20, 0xC0])
         XCTAssertEqual(bytes[6], 0, "first band type")
-        // 6.0 f32 LE = 0x40C00000
+
         XCTAssertEqual(Array(bytes[7..<11]), [0x00, 0x00, 0xC0, 0x40])
-        // 55.0 f32 LE = 0x425C0000
+
         XCTAssertEqual(Array(bytes[11..<15]), [0x00, 0x00, 0x5C, 0x42])
     }
 
@@ -240,7 +240,7 @@ final class EQProfileTests: XCTestCase {
 
 final class GestureAndSpatialTests: XCTestCase {
     func testDecodeGestureTable() {
-        // 2 rows: roller press -> play/pause, button triple press -> next.
+
         let rows = GestureBinding.decodeTable([2, 6, 1, 1, 9, 6, 0x0A, 7, 8])
         XCTAssertEqual(rows, [GestureBinding(side: 6, button: 1, gesture: 1, action: 9),
                               GestureBinding(side: 6, button: 0x0A, gesture: 7, action: 8)])
@@ -249,7 +249,7 @@ final class GestureAndSpatialTests: XCTestCase {
     func testDecodeGestureTableEdgeCases() {
         XCTAssertEqual(GestureBinding.decodeTable([]), [])
         XCTAssertEqual(GestureBinding.decodeTable([0]), [])
-        // Declares 3 rows but only 1.5 are present: keeps the complete one.
+
         XCTAssertEqual(GestureBinding.decodeTable([3, 6, 1, 1, 9, 6, 0x0A]).count, 1)
     }
 
@@ -257,9 +257,9 @@ final class GestureAndSpatialTests: XCTestCase {
         XCTAssertEqual(GestureBinding(side: 6, button: 0x0A, gesture: 7, action: 0x0B).encodeSet(), [1, 6, 0x0A, 7, 0x0B])
     }
 
-    func testIdentityIsButtonAndGesture() {
-        XCTAssertEqual(GestureBinding(side: 6, button: 0x0A, gesture: 7, action: 1).id, 0x0A07)
-        XCTAssertEqual(GestureBinding(side: 6, button: 1, gesture: 1, action: 9).id, 0x0101)
+    func testIdentityIsSideButtonAndGesture() {
+        XCTAssertEqual(GestureBinding(side: 6, button: 0x0A, gesture: 7, action: 1).id, 0x60A07)
+        XCTAssertEqual(GestureBinding(side: 6, button: 1, gesture: 1, action: 9).id, 0x60101)
     }
 
     func testSpatialDecodeEncode() {

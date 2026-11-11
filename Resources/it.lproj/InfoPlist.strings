@@ -1,0 +1,4 @@
+"NSBluetoothAlwaysUsageDescription" = "Nothing X si connette alle tue cuffie Nothing per regolare la cancellazione del rumore, l'equalizzatore, l'audio spaziale e leggere il livello della batteria.";
+"CFBundleDisplayName" = "Nothing X";
+"NSAudioCaptureUsageDescription" = "Nothing X acquisisce l'audio del Mac per ancorare il suono spaziale davanti a te e seguire la tua testa, e per equalizzarlo quando le cuffie sono collegate via cavo.";
+"NSAppleEventsUsageDescription" = "Nothing X legge e controlla ciò che Spotify, Musica e il tuo browser stanno riproducendo, per mostrarlo nell'app.";

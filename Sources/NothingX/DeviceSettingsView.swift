@@ -1,78 +1,40 @@
 import SwiftUI
 
-/// "Device" section: low latency, dual connection, adaptive ANC, in-ear detection, find my headphone.
-/// The audio codec (LDAC) is deliberately not offered: macOS only plays SBC and AAC over Bluetooth, so
-/// switching the headphone to LDAC changes nothing audible on a Mac (the model still supports it).
 struct DeviceSettingsView: View {
     @Environment(HeadphoneModel.self) private var model
-    /// First step of the find-my-headphone confirmation ("take it off first").
-    @State private var confirmingFind = false
 
     private var connected: Bool { model.connection == .connected }
+
+    private var tiles: [(symbol: String, title: LocalizedStringKey, detail: LocalizedStringKey, value: Bool?, set: (Bool) -> Void)] {
+        [("bolt.fill", "Low latency", "Reduces delay for video and games.", model.lowLatency, { model.setLowLatency($0) }),
+         ("laptopcomputer.and.iphone", "Dual connection", "Stay connected to two devices at once.", model.dualConnection, { model.setDualConnection($0) }),
+         ("waveform", "Adaptive ANC", "Adjusts noise cancelling to your surroundings.", model.adaptiveANC, { model.setAdaptiveANC($0) }),
+         ("ear", "In-ear detection", "Pauses music when you take them off.", model.inEarDetection, { model.setInEarDetection($0) })]
+            .filter { !connected || $0.value != nil }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             SectionHeader(title: "Device")
-            toggleRow("Low latency", model.lowLatency) { model.setLowLatency($0) }
-            toggleRow("Dual connection", model.dualConnection) { model.setDualConnection($0) }
-            toggleRow("Adaptive ANC", model.adaptiveANC) { model.setAdaptiveANC($0) }
-            toggleRow("In-ear detection", model.inEarDetection) { model.setInEarDetection($0) }
-            findRow
-        }
-        .disabled(!connected)
-        .opacity(connected ? 1 : 0.4)
-        .onChange(of: connected) { _, now in if !now { confirmingFind = false } }
-    }
-
-    private func row<Control: View>(_ title: LocalizedStringKey, @ViewBuilder _ control: () -> Control) -> some View {
-        HStack(spacing: 16) {
-            Text(title).ntLabel().frame(width: 150, alignment: .leading)
-            control()
-        }
-    }
-
-    private func toggleRow(_ title: LocalizedStringKey, _ value: Bool?, _ onSelect: @escaping (Bool) -> Void) -> some View {
-        row(title) {
-            Segmented(
-                options: [(false, String(localized: "Off")), (true, String(localized: "On"))],
-                selection: value,
-                onSelect: onSelect
-            )
-        }
-    }
-
-    // MARK: Find my headphone
-
-    private var findRow: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if model.findPlaying {
-                HStack {
-                    Text("Playing…").ntLabel(NTColor.primary)
-                    Spacer()
-                    textButton("[Stop]", NTColor.primary) { model.stopFind() }
+            LazyVGrid(columns: settingsColumns, spacing: 12) {
+                ForEach(tiles.indices, id: \.self) { index in
+                    let tile = tiles[index]
+                    DeviceToggleTile(symbol: tile.symbol, title: tile.title, detail: tile.detail, value: tile.value, onSelect: tile.set)
                 }
-            } else if confirmingFind {
-                Text("Take the headphone off first").ntLabel(NTColor.primary)
-                HStack(spacing: 24) {
-                    textButton("[Play sound]", NTColor.primary) {
-                        confirmingFind = false
-                        model.startFindPulse()
+                if !DeviceKind(name: model.deviceName).isEarbuds {
+                    ActionTile(symbol: model.findPlaying ? "speaker.wave.3.fill" : "speaker.wave.2.fill",
+                               title: "Find my headphone",
+                               detail: "Plays a sound on the headphone so you can find it. Take it off first.",
+                               buttonTitle: model.findPlaying ? "Stop" : "Play sound",
+                               active: model.findPlaying) {
+                        if model.findPlaying { model.stopFind() } else { model.startFindPulse() }
                     }
-                    textButton("[Cancel]", NTColor.secondary) { confirmingFind = false }
-                }
-            } else {
-                HStack {
-                    textButton("[Find my headphone]", NTColor.secondary) { confirmingFind = true }
-                    Spacer()
-                    Text("Experimental").ntLabel(NTColor.disabled)
                 }
             }
         }
-        .padding(.top, 4)
-    }
-
-    private func textButton(_ title: LocalizedStringKey, _ color: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Text(title).ntLabel(color) }
-            .buttonStyle(.plain)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .ntCard()
+        .disabled(!connected)
+        .opacity(connected ? 1 : 0.4)
     }
 }

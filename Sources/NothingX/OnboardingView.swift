@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Content of the main window: the dashboard, with the first-run tour painted over it while it is presented.
 struct OnboardingRoot: View {
     private let controller = OnboardingController.shared
 
@@ -17,21 +16,18 @@ struct OnboardingRoot: View {
     }
 }
 
-/// The first-run tour, inside the 900×700 main window. It holds the pure `OnboardingFlow` and is the only
-/// glue between it and the model and services: link state in, `startLink()` and the outcome out.
 struct OnboardingView: View {
     @Environment(HeadphoneModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let service = NotificationService.shared
 
     @State private var flow = OnboardingFlow(bluetooth: Self.seed(BluetoothGate.current))
-    /// The pending 0.8 s pause before an automatic `.next`; cancelled on step change and disappearance.
+
     @State private var beat: Task<Void, Never>?
-    /// The notification permission request in flight.
+
     @State private var notificationRequest: Task<Void, Never>?
     @State private var requestingNotifications = false
 
-    /// The permission as known before the link runs. A preflight: it never prompts and never blocks.
     private static func seed(_ gate: BluetoothGate) -> OnboardingFlow.Bluetooth {
         switch gate {
         case .pending: .notAsked
@@ -45,14 +41,9 @@ struct OnboardingView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            topBar
-                .padding(.horizontal, 32)
-                .padding(.top, 34)       // sits below the traffic-light buttons
-                .frame(height: 64, alignment: .top)
-                .background(WindowDragHandle())
+        VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 28) {
-                hero.frame(height: 120, alignment: .bottomLeading)
+                hero.frame(height: 140, alignment: .bottomLeading)
                 ZStack(alignment: .topLeading) {
                     stepContent
                         .id(flow.step)
@@ -60,17 +51,19 @@ struct OnboardingView: View {
                 }
                 .animation(.easeOut(duration: 0.3), value: flow.step)
             }
-            .frame(width: 560, alignment: .leading)
-            .frame(maxHeight: .infinity, alignment: .topLeading)
-            .padding(.top, 20)
+            .frame(maxWidth: 560, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .padding(.top, Layout.topInset)
             .padding(.horizontal, 32)
             bottomRow
+                .frame(maxWidth: 560)
                 .padding(.horizontal, 32)
                 .padding(.bottom, 32)
         }
-        .frame(width: 900, height: 700)
-        .background(NTColor.background)
-        .contentShape(Rectangle())          // nothing reaches the dashboard underneath
+        .overlay(alignment: .top) { WindowDragHandle().frame(height: 64) }
+        .frame(minWidth: 900, maxWidth: .infinity, minHeight: 700, maxHeight: .infinity)
+        .background(NTBackground())
+        .contentShape(Rectangle())
         .foregroundStyle(NTColor.primary)
         .onChange(of: model.connection, initial: true) { forwardConnection() }
         .onChange(of: model.linkStarted) { forwardConnection() }
@@ -93,42 +86,17 @@ struct OnboardingView: View {
             cancelBeat()
             notificationRequest?.cancel()
             notificationRequest = nil
-            // Window closed mid-tour: the menu bar item must still work. The tour restarts at Welcome,
-            // re-seeded from the current gate, when the window comes back.
+
             if flow.outcome == nil { startLinkLater() }
         }
     }
 
-    /// Starts the link on the next main-actor turn: `startLink()` changes `model.connection` synchronously,
-    /// which must not happen during a view update.
     private func startLinkLater() {
         let model = model
         Task { @MainActor in model.startLink() }
     }
 
-    // MARK: Top bar
-
-    private var topBar: some View {
-        HStack {
-            Text("Nothing X").ntLabel()
-            Spacer()
-            Button { flow.handle(.skip) } label: {
-                Text("[Skip]").ntLabel(NTColor.secondary)
-            }
-            .buttonStyle(.plain)
-            .keyboardShortcut(.cancelAction)
-            .accessibilityLabel(Text("Skip the welcome tour"))
-        }
-    }
-
-    // MARK: Hero
-
-    /// What the hero shows; a change cross-fades it.
-    private var heroKey: String {
-        if flow.step == .welcome { return "welcome" }
-        if flow.step == .connect, model.connection == .connected { return "battery-\(model.battery ?? -1)" }
-        return "step-\(flow.step.rawValue)"
-    }
+    private var heroKey: String { "step-\(flow.step.rawValue)-\(model.connection == .connected)" }
 
     private var hero: some View {
         ZStack(alignment: .bottomLeading) {
@@ -141,19 +109,18 @@ struct OnboardingView: View {
 
     @ViewBuilder private var heroContent: some View {
         if flow.step == .welcome {
-            DotXMark()
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 128, height: 128)
+                .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
         } else if flow.step == .connect, model.connection == .connected {
-            if let level = model.battery {
-                DotMatrixText(text: "\(level)%", dot: 8)
-            } else {
-                DotMatrixText(text: "--", dot: 8, color: NTColor.disabled)
-            }
+            DeviceIllustration(deviceName: model.deviceName, size: 150).frame(width: 160, height: 140)
         } else {
-            DotMatrixText(text: String(format: "%02d", flow.step.rawValue + 1), dot: 8, color: NTColor.disabled)
+            IconBadge(symbol: flow.step.symbol, filled: flow.step == .done)
+                .scaleEffect(1.8, anchor: .bottomLeading)
         }
     }
-
-    // MARK: Step content
 
     @ViewBuilder private var stepContent: some View {
         switch flow.step {
@@ -161,24 +128,26 @@ struct OnboardingView: View {
         case .bluetooth: BluetoothStep(state: flow.bluetooth)
         case .connect: ConnectStep()
         case .notifications: NotificationsStep()
+        case .media: MediaStep()
         case .macAnchor: MacAnchorStep()
         case .done: DoneStep()
         }
     }
 
-    // MARK: Bottom row
-
     private var bottomRow: some View {
         HStack(alignment: .center, spacing: 24) {
             OnboardingProgress(step: flow.step, completed: flow.completedSteps)
             Spacer(minLength: 0)
+            Button { flow.handle(.skip) } label: { ActionText("[Skip]", NTColor.secondary) }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+                .accessibilityLabel(Text("Skip the welcome tour"))
             actions.fixedSize()
         }
     }
 
-    /// At most one `.defaultAction` button at a time: the step's primary action, when it has one.
     @ViewBuilder private var actions: some View {
-        HStack(spacing: 24) {
+        HStack(spacing: 12) {
             switch flow.step {
             case .welcome:
                 primary("[Continue]") { next(from: .welcome) }
@@ -196,10 +165,13 @@ struct OnboardingView: View {
                     primary("[Continue]") { next(from: .connect) }
                 } else {
                     secondary("[Pair in System Settings]") { OnboardingLinks.openBluetoothPairing() }
-                    primary("[Later]", color: NTColor.secondary) { next(from: .connect) }
+                    secondary("[Later]") { next(from: .connect) }
                 }
             case .notifications:
                 notificationActions
+            case .media:
+                secondary("[Continue]") { next(from: .media) }
+                primary("[Allow all]") { MediaPermissionList.requestAll() }
             case .macAnchor:
                 primary("[Got it]") { next(from: .macAnchor) }
             case .done:
@@ -223,28 +195,20 @@ struct OnboardingView: View {
         }
     }
 
-    private func primary(_ title: LocalizedStringKey, color: Color = NTColor.primary,
-                         action: @escaping () -> Void) -> some View {
-        Button(action: action) { Text(title).ntLabel(color) }
-            .buttonStyle(.plain)
+    private func primary(_ title: LocalizedStringResource, action: @escaping () -> Void) -> some View {
+        PillButton(title: title, prominent: true, action: action)
             .keyboardShortcut(.defaultAction)
     }
 
-    private func secondary(_ title: LocalizedStringKey, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Text(title).ntLabel(NTColor.secondary) }
-            .buttonStyle(.plain)
+    private func secondary(_ title: LocalizedStringResource, action: @escaping () -> Void) -> some View {
+        PillButton(title: title, action: action)
     }
 
-    // MARK: Glue
-
-    /// `.next`, only if the flow is still on `step`: a late timer or a double press never skips a step.
     private func next(from step: OnboardingStep) {
         guard flow.step == step else { return }
         flow.handle(.next)
     }
 
-    /// Link state → flow, only once the link runs: before that `connection` is just its `.searching` default
-    /// and says nothing about the permission.
     private func forwardConnection() {
         guard model.linkStarted else { return }
         let state: OnboardingFlow.Bluetooth
@@ -256,7 +220,6 @@ struct OnboardingView: View {
         if state != flow.bluetooth { flow.handle(.bluetoothChanged(state)) }
     }
 
-    /// Moves on from `step` after a short beat that lets the "allowed" line be read.
     private func scheduleNext(from step: OnboardingStep) {
         beat?.cancel()
         beat = Task {
@@ -278,7 +241,7 @@ struct OnboardingView: View {
         notificationRequest = Task {
             let ok = await service.requestAuthorization()
             requestingNotifications = false
-            guard !Task.isCancelled, ok else { return }      // refused: the denied state renders
+            guard !Task.isCancelled, ok else { return }
             scheduleNext(from: .notifications)
         }
     }

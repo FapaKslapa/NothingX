@@ -2,23 +2,9 @@ import AVFoundation
 import CoreAudio
 import Foundation
 
-/// Software equalizer for wired (USB) mode: the Mac equalizes everything it plays before it reaches the
-/// headphone, because the headphone's own EQ cannot be reached while its cable is plugged in (Bluetooth
-/// is down then).
-///
-/// Pipeline: `SystemAudioTap` (global process tap, our own process excluded, muted while read, tap-only
-/// aggregate) → `StereoRing` → one stereo `AVAudioSourceNode` → `AVAudioUnitEQ` (8 bands) → main mixer →
-/// the headphone's USB output device.
-///
-/// Gains change live on the running unit (ramped, see `setBands`); the graph and the ring are never
-/// rebuilt for an EQ change. Headroom: the unit's global gain is `SoftwareEQ.headroom` of the current
-/// gains (minus the largest boost) so boosted curves do not clip.
-///
-/// If the output device disappears (cable unplugged) the engine stops by itself, destroys the tap (system
-/// audio comes back on its own) and calls `onDeviceLost`.
 final class EQAudioEngine {
     private(set) var isRunning = false
-    /// Main queue. The engine has already stopped and released the tap when this is called.
+
     var onDeviceLost: (() -> Void)?
 
     private let tap = SystemAudioTap(tapName: "Nothing X equalizer tap", aggregateName: "Nothing X equalizer",
@@ -33,17 +19,13 @@ final class EQAudioEngine {
     private var configObserver: NSObjectProtocol?
     private var devicesListener: AudioObjectPropertyListenerBlock?
 
-    /// Gains currently on the unit, and where the ramp is taking them.
     private var appliedGains = [Float](repeating: 0, count: SoftwareEQ.frequencies.count)
     private var targetGains = [Float](repeating: 0, count: SoftwareEQ.frequencies.count)
     private var rampTimer: Timer?
-    /// 1 dB every 10 ms: a slider step lands in one tick, a ±12 dB preset jump takes ~0.1 s.
+
     private static let rampStep: Float = 1
     private static let rampInterval: TimeInterval = 0.01
 
-    // MARK: Lifecycle
-
-    /// Call on the main thread.
     func start(device: AudioDevices.Device, bands: [EQBand]) throws {
         guard !isRunning else { return }
         do {
@@ -62,7 +44,6 @@ final class EQAudioEngine {
         }
     }
 
-    /// Idempotent: the model and the device-loss path may both call it.
     func stop() {
         rampTimer?.invalidate(); rampTimer = nil
         if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
@@ -82,12 +63,9 @@ final class EQAudioEngine {
         isRunning = false
     }
 
-    /// Live EQ change: ramps the gains on the running unit; no restart, no re-prime of the ring.
     func setBands(_ bands: [EQBand]) {
         configure(bands, immediately: !isRunning)
     }
-
-    // MARK: Graph
 
     private func buildGraph(outputDevice: AudioObjectID) throws {
         try engine.outputNode.auAudioUnit.setDeviceID(outputDevice)
@@ -114,8 +92,6 @@ final class EQAudioEngine {
         engine.prepare()
     }
 
-    /// Type / frequency / bandwidth are set directly (they only change with the band layout, never while
-    /// dragging); gains go through the ramp.
     private func configure(_ bands: [EQBand], immediately: Bool) {
         for (i, unitBand) in eq.bands.enumerated() {
             let band = i < bands.count ? bands[i]
@@ -135,7 +111,7 @@ final class EQAudioEngine {
             rampTick()
             guard appliedGains != targetGains else { return }
             let timer = Timer(timeInterval: Self.rampInterval, repeats: true) { [weak self] _ in self?.rampTick() }
-            RunLoop.main.add(timer, forMode: .common)   // keeps ticking while a slider is being dragged
+            RunLoop.main.add(timer, forMode: .common)
             rampTimer = timer
         }
     }
@@ -151,8 +127,6 @@ final class EQAudioEngine {
         eq.globalGain = SoftwareEQ.headroom(appliedGains)
     }
 
-    // MARK: Device changes
-
     private static var devicesAddress: AudioObjectPropertyAddress {
         AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices,
                                    mScope: kAudioObjectPropertyScopeGlobal,
@@ -160,7 +134,7 @@ final class EQAudioEngine {
     }
 
     private func observeDevice() {
-        // Format / sample-rate changes: restart on the same device. If the device is gone, stop.
+
         configObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
             guard let self, self.isRunning else { return }
             guard let uid = self.deviceUID, let device = AudioDevices.softwareEQDevice(uid: uid) else {
@@ -171,7 +145,7 @@ final class EQAudioEngine {
             try? self.engine.outputNode.auAudioUnit.setDeviceID(device.id)
             do { try self.engine.start() } catch { self.deviceLost() }
         }
-        // Cable unplugged: the device leaves the system list (the engine may not post a change for it).
+
         let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             guard let self, self.isRunning, let uid = self.deviceUID else { return }
             if AudioDevices.softwareEQDevice(uid: uid) == nil { self.deviceLost() }
@@ -189,14 +163,10 @@ final class EQAudioEngine {
     }
 }
 
-// MARK: - Stereo ring buffer
-
-/// Same policy as `AudioRing` (prefill, bounded latency, drop the oldest when behind) but both channels
-/// under one lock, so left and right can never drift apart by a block.
 final class StereoRing {
-    private let capacity = 1 << 15          // 32768 frames
-    private let prefill = 1024              // wait for this much before starting playback
-    private let maxFill = 6144              // never let latency grow past this
+    private let capacity = 1 << 15
+    private let prefill = 1024
+    private let maxFill = 6144
     private let keepAfterDrop = 2048
     private let left: UnsafeMutablePointer<Float>
     private let right: UnsafeMutablePointer<Float>
@@ -215,7 +185,6 @@ final class StereoRing {
 
     deinit { left.deallocate(); right.deallocate(); lock.deallocate() }
 
-    /// Frames waiting to be read (for tests).
     var fill: Int {
         os_unfair_lock_lock(lock)
         defer { os_unfair_lock_unlock(lock) }
@@ -253,7 +222,7 @@ final class StereoRing {
                 dstR[i] = right[index]
             }
             readPos += produced
-            if produced < count { playing = false }   // underrun: rebuffer
+            if produced < count { playing = false }
         }
         os_unfair_lock_unlock(lock)
         if produced < count {
@@ -262,14 +231,8 @@ final class StereoRing {
     }
 }
 
-// MARK: - USB output lookup
-
 extension AudioDevices {
-    /// The headphone's output for the software EQ: among output devices whose name contains `fragment`,
-    /// the one on the USB transport (the headphone also shows up as a separate 1-channel USB input, which
-    /// has no output streams and is skipped). Falls back to `outputDevice(nameContaining:)`, but never to the
-    /// Bluetooth output: right after an unplug the headphone reconnects over Bluetooth and the software EQ
-    /// must not follow it there.
+
     static func usbOutputDevice(forSoftwareEQ fragment: String) -> Device? {
         let usb = softwareEQOutputDevices().first {
             $0.name.localizedCaseInsensitiveContains(fragment) && softwareEQTransport($0.id) == kAudioDeviceTransportTypeUSB
@@ -281,7 +244,6 @@ extension AudioDevices {
         return bluetooth ? nil : fallback
     }
 
-    /// The output device with this UID, if it is still present.
     static func softwareEQDevice(uid: String) -> Device? {
         softwareEQOutputDevices().first { $0.uid == uid }
     }

@@ -2,10 +2,9 @@ import XCTest
 @testable import NothingX
 
 final class HeadPoseFilterTests: XCTestCase {
-    private let halfTurn = 1_073_741_824.0                      // 2^30 units = 180 degrees of yaw
-    private let tiltUnitsPerDegree = (Double.pi / 180) * 536_870_912.0   // 2^-29 rad per unit
+    private let halfTurn = 1_073_741_824.0
+    private let tiltUnitsPerDegree = (Double.pi / 180) * 536_870_912.0
 
-    /// A 16-byte `E015` payload: pitch, roll, yaw as little-endian Int32, then a Float32 confidence.
     private func payload(yaw: Double = 0, pitch: Double = 0, roll: Double = 0, settled: Float = 0) -> [UInt8] {
         func le(_ v: Int32) -> [UInt8] {
             let u = UInt32(bitPattern: v)
@@ -16,32 +15,27 @@ final class HeadPoseFilterTests: XCTestCase {
             + le(units(yaw, halfTurn / 180)) + le(Int32(bitPattern: settled.bitPattern))
     }
 
-    /// Smallest absolute angular distance between two directions, in degrees.
     private func circularDistance(_ a: Double, _ b: Double) -> Double {
         let d = (a - b).truncatingRemainder(dividingBy: 360)
         return min(abs(d), 360 - abs(d))
     }
 
-    /// Settles the display smoothing so `orientation` returns the target (long dt makes alpha ~ 1).
     private func settle(_ f: HeadPoseFilter, at now: Double, sensitivity: Double = 1) -> HeadPoseFilter.Angles {
         _ = f.orientation(now: now, sensitivity: sensitivity)
         return f.orientation(now: now + 100, sensitivity: sensitivity)
     }
 
-    // MARK: Scale and signs
-
     func testYawHalfTurnIsOneEightyDegrees() {
         let f = HeadPoseFilter()
-        f.ingest(payload(), now: 1)                         // reference
+        f.ingest(payload(), now: 1)
         f.ingest(payload(yaw: 90), now: 2)
         XCTAssertEqual(f.current.yaw, 90, accuracy: 1e-3)
         XCTAssertEqual(f.current.pitch, 0, accuracy: 1e-6)
 
-        // And literally 2^30 units from the reference is 180 degrees.
         let g = HeadPoseFilter()
         var half = [UInt8](repeating: 0, count: 16)
         g.ingest(half, now: 1)
-        half[8] = 0x00; half[9] = 0x00; half[10] = 0x00; half[11] = 0x40   // 0x40000000 = 2^30
+        half[8] = 0x00; half[9] = 0x00; half[10] = 0x00; half[11] = 0x40
         g.ingest(half, now: 2)
         XCTAssertEqual(abs(g.current.yaw), 180, accuracy: 1e-6)
     }
@@ -61,11 +55,11 @@ final class HeadPoseFilterTests: XCTestCase {
     }
 
     func testLittleEndianWordOrder() {
-        // pitch word = 1 << 8 only; if the three words were swapped the other angles would move.
+
         var bytes = [UInt8](repeating: 0, count: 16)
         let f = HeadPoseFilter()
         f.ingest(bytes, now: 1)
-        bytes[1] = 1   // pitch word = 256
+        bytes[1] = 1
         f.ingest(bytes, now: 2)
         XCTAssertEqual(f.current.pitch, 256 / tiltUnitsPerDegree, accuracy: 1e-9)
         XCTAssertEqual(f.current.roll, 0)
@@ -104,7 +98,7 @@ final class HeadPoseFilterTests: XCTestCase {
         let f = HeadPoseFilter()
         f.ingest(payload(), now: 1)
         f.ingest(payload(yaw: 20, pitch: 10, roll: 6), now: 2)
-        f.ingest(payload(yaw: 20, pitch: 10, roll: 6), now: 3)     // head still: no extrapolation
+        f.ingest(payload(yaw: 20, pitch: 10, roll: 6), now: 3)
         let one = settle(f, at: 3, sensitivity: 1)
         XCTAssertEqual(one.yaw, 20, accuracy: 1e-2)
         XCTAssertEqual(one.pitch, 10, accuracy: 1e-2)
@@ -122,8 +116,6 @@ final class HeadPoseFilterTests: XCTestCase {
         XCTAssertEqual(HeadPoseFilter().orientation(now: 5, sensitivity: 1), HeadPoseFilter.Angles())
     }
 
-    // MARK: Continuity across the back (+-180 degrees)
-
     func testCurrentWrapsIntoPlusMinus180() {
         let f = HeadPoseFilter()
         f.ingest(payload(), now: 1)
@@ -136,16 +128,16 @@ final class HeadPoseFilterTests: XCTestCase {
     func testDisplayedYawCrossesTheBackWithoutJumpOrLongWaySweep() {
         let f = HeadPoseFilter()
         f.ingest(payload(), now: 0.9)
-        // Head turns left through the back at 30 degrees per 0.1 s sample: 150, 170, 190 (= -170), 210 ...
+
         let yaws: [Double] = [150, 170, 190, 210, 230, 250]
         var previousOut: Double?
         var minAbsNearBack = Double.infinity
         var t = 1.0
         for (i, yaw) in yaws.enumerated() {
-            // The raw word wraps at +-360, like the headphone's Int32: send the wrapped value.
+
             let wireYaw = yaw > 180 ? yaw - 360 : yaw
             f.ingest(payload(yaw: wireYaw), now: t)
-            // Render at ~60 Hz until the next sample.
+
             for k in 0..<6 {
                 let out = f.orientation(now: t + Double(k) / 60, sensitivity: 1).yaw
                 if i > 0 {
@@ -158,7 +150,7 @@ final class HeadPoseFilterTests: XCTestCase {
             }
             t += 0.1
         }
-        // A long-way sweep would pass through values near 0; going through the back stays beyond 100.
+
         XCTAssertGreaterThan(minAbsNearBack, 100)
     }
 
@@ -187,7 +179,7 @@ final class HeadPoseFilterTests: XCTestCase {
         f.ingest(payload(), now: 1)
         var t = 1.1
         var previousOut = 0.0
-        // Full turn and a half in steps of 20 degrees.
+
         for deg in stride(from: 20.0, through: 540.0, by: 20) {
             var wire = deg.truncatingRemainder(dividingBy: 360)
             if wire > 180 { wire -= 360 }
@@ -195,11 +187,9 @@ final class HeadPoseFilterTests: XCTestCase {
             let out = settle(f, at: t).yaw
             if deg > 20 { XCTAssertLessThanOrEqual(circularDistance(out, previousOut), 20 + 1e-2, "at \(deg)") }
             previousOut = out
-            t += 1000   // settle() advanced the tick clock by 100 s
+            t += 1000
         }
     }
-
-    // MARK: Recenter
 
     func testRecenterMakesCurrentDirectionZero() {
         let f = HeadPoseFilter()
@@ -213,7 +203,6 @@ final class HeadPoseFilterTests: XCTestCase {
         XCTAssertEqual(out.yaw, 0, accuracy: 1e-6)
         XCTAssertEqual(out.pitch, 0, accuracy: 1e-6)
 
-        // Turning further is measured from the new direction, and coming back reads zero again.
         f.ingest(payload(yaw: 55, pitch: 10, roll: -6), now: 3)
         XCTAssertEqual(f.current.yaw, 15, accuracy: 1e-3)
         f.ingest(payload(yaw: 40, pitch: 10, roll: -6), now: 4)
@@ -236,7 +225,7 @@ final class HeadPoseFilterTests: XCTestCase {
         let f = HeadPoseFilter()
         f.ingest(payload(), now: 1)
         f.ingest(payload(yaw: 120), now: 2)
-        f.ingest(payload(yaw: -160), now: 3)       // 200 degrees round the back
+        f.ingest(payload(yaw: -160), now: 3)
         f.recenter()
         XCTAssertEqual(f.current.yaw, 0, accuracy: 1e-6)
         f.ingest(payload(yaw: -150), now: 4)
@@ -264,12 +253,10 @@ final class HeadPoseFilterTests: XCTestCase {
         XCTAssertEqual(f.current.yaw, 0, accuracy: 1e-6)
     }
 
-    // MARK: Auto-recenter (yaw drift)
-
     func testDriftIsCancelledWhileSettledAndNearReference() {
         let f = HeadPoseFilter()
         f.ingest(payload(settled: 1), now: 1)
-        // 25 s later (one time constant) the reference has moved 1 - e^-1 of the 10 degree offset.
+
         f.ingest(payload(yaw: 10, settled: 1), now: 26)
         let expected = 10 * exp(-1.0)
         XCTAssertEqual(f.current.yaw, expected, accuracy: 1e-3)
@@ -296,7 +283,7 @@ final class HeadPoseFilterTests: XCTestCase {
     func testNoAutoRecenterOutsideTheTwentyDegreeWindow() {
         let f = HeadPoseFilter()
         f.ingest(payload(settled: 1), now: 1)
-        // Looking at a second screen, still head: the anchor must not follow.
+
         f.ingest(payload(yaw: 35, settled: 1), now: 26)
         XCTAssertEqual(f.current.yaw, 35, accuracy: 1e-3)
         f.ingest(payload(yaw: 35, settled: 1), now: 1000)
@@ -310,7 +297,7 @@ final class HeadPoseFilterTests: XCTestCase {
     }
 
     func testWindowAppliesAroundTheReferenceAcrossTheBack() {
-        // Reference faces the Mac; a head looking behind (about 180 degrees) is far outside the window.
+
         let f = HeadPoseFilter()
         f.ingest(payload(settled: 1), now: 1)
         f.ingest(payload(yaw: 179, settled: 1), now: 26)
@@ -327,7 +314,7 @@ final class HeadPoseFilterTests: XCTestCase {
     }
 
     func testAutoRecenterNeedsAPreviousSampleTime() {
-        // The very first update after the reference has no elapsed time to integrate.
+
         let f = HeadPoseFilter()
         f.ingest(payload(settled: 1), now: 0)
         f.ingest(payload(yaw: 10, settled: 1), now: 25)
@@ -337,11 +324,9 @@ final class HeadPoseFilterTests: XCTestCase {
     func testLongGapFullyAbsorbsSmallDriftOnlyWhenSettled() {
         let f = HeadPoseFilter()
         f.ingest(payload(settled: 1), now: 1)
-        f.ingest(payload(yaw: 5, settled: 1), now: 1001)   // 1000 s: k ~ 1
+        f.ingest(payload(yaw: 5, settled: 1), now: 1001)
         XCTAssertEqual(f.current.yaw, 0, accuracy: 1e-3)
     }
-
-    // MARK: Smoothing and extrapolation at 10 Hz
 
     func testSparseSamplesAreSmoothedMonotonically() {
         let f = HeadPoseFilter()
@@ -350,7 +335,7 @@ final class HeadPoseFilterTests: XCTestCase {
         var yaw = 0.0
         var last = -Double.infinity
         var series: [Double] = []
-        // 10 Hz samples, constant 40 degrees per second, rendered at 60 Hz.
+
         for _ in 0..<30 {
             yaw += 4
             f.ingest(payload(yaw: yaw), now: t)
@@ -362,9 +347,9 @@ final class HeadPoseFilterTests: XCTestCase {
             }
             t += 0.1
         }
-        // It follows the head: within a fraction of one sample step of the newest sample.
+
         XCTAssertEqual(last, yaw, accuracy: 6)
-        // And it moves in small increments (no stair-stepping at the 10 Hz sample rate).
+
         let steps = zip(series.dropFirst(), series).map { $0 - $1 }
         XCTAssertLessThan(steps.max() ?? 0, 4, "no step bigger than one whole sample")
     }
@@ -373,7 +358,7 @@ final class HeadPoseFilterTests: XCTestCase {
         let f = HeadPoseFilter()
         f.ingest(payload(), now: 0)
         f.ingest(payload(yaw: 30, pitch: 12), now: 1)
-        f.ingest(payload(yaw: 30, pitch: 12), now: 1.1)      // head still: zero velocity
+        f.ingest(payload(yaw: 30, pitch: 12), now: 1.1)
         var t = 1.1
         var out = HeadPoseFilter.Angles()
         for _ in 0..<120 {
@@ -387,8 +372,8 @@ final class HeadPoseFilterTests: XCTestCase {
     func testExtrapolationIsCappedToTwelveHundredthsOfASecond() {
         let f = HeadPoseFilter()
         f.ingest(payload(), now: 1)
-        f.ingest(payload(yaw: 10), now: 1.1)     // 100 degrees per second
-        // Rendering long after the last sample must not keep extrapolating: converge to latest + 0.12 * v.
+        f.ingest(payload(yaw: 10), now: 1.1)
+
         let out = settle(f, at: 1.1).yaw
         XCTAssertEqual(out, 10 + 100 * 0.12, accuracy: 1e-2)
     }
@@ -396,7 +381,7 @@ final class HeadPoseFilterTests: XCTestCase {
     func testExtrapolatedVelocityIsClamped() {
         let f = HeadPoseFilter()
         f.ingest(payload(), now: 1)
-        f.ingest(payload(yaw: 90), now: 1.1)     // 900 deg/s -> clamped to 400
+        f.ingest(payload(yaw: 90), now: 1.1)
         let out = settle(f, at: 1.1).yaw
         XCTAssertEqual(out, 90 + 400 * 0.12, accuracy: 1e-2)
     }
@@ -405,7 +390,7 @@ final class HeadPoseFilterTests: XCTestCase {
         let f = HeadPoseFilter()
         f.ingest(payload(), now: 1)
         f.ingest(payload(yaw: 10), now: 2)
-        f.recenter()                              // drops the previous sample, latest becomes zero
+        f.recenter()
         XCTAssertEqual(settle(f, at: 2).yaw, 0, accuracy: 1e-9, "no velocity estimate: no extrapolation")
     }
 }

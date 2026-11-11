@@ -1,8 +1,6 @@
 import SwiftUI
 import AppKit
 
-/// A view that moves the window when dragged: put it behind a title-like area now that the whole window
-/// background is no longer draggable.
 struct WindowDragHandle: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { DragView() }
     func updateNSView(_ nsView: NSView, context: Context) {}
@@ -12,8 +10,6 @@ struct WindowDragHandle: NSViewRepresentable {
     }
 }
 
-/// Blends the window chrome into the content: the title bar is transparent over a black window, so it
-/// reads as black. Content is NOT extended under it, which keeps the traffic-light buttons on top.
 struct WindowConfigurator: NSViewRepresentable {
     var title = "Nothing X"
 
@@ -35,12 +31,11 @@ struct WindowConfigurator: NSViewRepresentable {
             window.styleMask.formUnion([.titled, .closable, .miniaturizable, .fullSizeContentView])
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden
-            // Not movable by background: custom drag controls (the EQ sliders) would otherwise drag the whole
-            // window along with the value. The top bar uses `WindowDragHandle` instead.
+
             window.isMovableByWindowBackground = false
             window.backgroundColor = .black
             raiseTrafficLights(in: window)
-            // SwiftUI can re-order the window's views; keep the buttons on top.
+
             for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResizeNotification, NSWindow.didExposeNotification] {
                 observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self, weak window] _ in
                     if let window { self?.raiseTrafficLights(in: window) }
@@ -51,8 +46,6 @@ struct WindowConfigurator: NSViewRepresentable {
             }
         }
 
-        /// With content extended under the title bar, the hosting view paints over the traffic-light
-        /// buttons. Moving the title bar container above the content brings them back.
         private func raiseTrafficLights(in window: NSWindow) {
             for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
                 window.standardWindowButton(kind)?.isHidden = false
@@ -67,8 +60,6 @@ struct WindowConfigurator: NSViewRepresentable {
             hideTitlebarBackground(in: container)
         }
 
-        /// The system paints a grey blur behind the title bar and re-shows it on state changes:
-        /// hide it, and hide it again whenever AppKit turns it back on.
         private func hideTitlebarBackground(in view: NSView) {
             for sub in view.subviews {
                 let name = String(describing: type(of: sub))
@@ -89,12 +80,12 @@ struct WindowConfigurator: NSViewRepresentable {
 
 @main
 struct NothingXApp: App {
-    /// Defer the link only while the tour is pending and the Bluetooth prompt has not been answered: the prompt must come after the tour explains it.
+
     @State private var model = HeadphoneModel(startLink: !OnboardingController.shared.isPresented || BluetoothGate.current != .pending)
-    /// Starts Sparkle at launch (scheduled checks need the updater running).
+
+    @State private var navigation = AppNavigation()
     private let updater = Updater.shared
 
-    /// Dot-X glyph, drawn as a template so macOS tints it for light and dark menu bars.
     private static var menuBarImage: NSImage {
         let image = NSImage(named: "MenuBarIcon") ?? NSImage(systemSymbolName: "headphones", accessibilityDescription: nil)!
         image.isTemplate = true
@@ -106,60 +97,40 @@ struct NothingXApp: App {
         WindowGroup(id: "main") {
             OnboardingRoot()
                 .environment(model)
+                .environment(navigation)
                 .preferredColorScheme(.dark)
                 .background(WindowConfigurator())
+                .ntAccentRoot()
         }
-        .windowResizability(.contentSize)
-
-        Settings {
-            SettingsView()
-                .environment(model)
-        }
+        .windowResizability(.contentMinSize)
+        .commands { SettingsCommand(navigation: navigation) }
 
         MenuBarExtra {
-            MenuContent().environment(model)
+            MenuBarPanel()
+                .environment(model)
+                .environment(navigation)
+                .preferredColorScheme(.dark)
+                .ntAccentRoot()
         } label: {
             Image(nsImage: Self.menuBarImage)
             if let level = model.battery { Text(verbatim: "\(level)%") }
         }
+        .menuBarExtraStyle(.window)
     }
 }
 
-struct MenuContent: View {
-    @Environment(HeadphoneModel.self) private var model
-    @Environment(\.openSettings) private var openSettings
+struct SettingsCommand: Commands {
+    let navigation: AppNavigation
     @Environment(\.openWindow) private var openWindow
 
-    var body: some View {
-        if model.isWired {
-            Text("Wired (USB)")
-        } else if model.connection == .connected {
-            Text(verbatim: "\(model.deviceName) — \(model.battery.map { "\($0)%" } ?? "…")")
-        } else if model.connection == .permissionPending {
-            Text("Waiting for Bluetooth permission…")
-        } else if model.connection == .permissionDenied {
-            Text("Bluetooth access denied")
-            Button("Open Bluetooth settings") { BluetoothGate.openSettings() }
-        } else {
-            Text("Headphone not connected")
+    var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") {
+                navigation.showSettings = true
+                NSApp.activate(ignoringOtherApps: true)
+                openWindow(id: "main")
+            }
+            .keyboardShortcut(",")
         }
-        Divider()
-        Button("Noise control: ANC") { model.setANCKind(.anc) }
-        Button("Transparency") { model.setANCKind(.transparency) }
-        Button("Noise control: Off") { model.setANCKind(.off) }
-        if model.macAnchored {
-            Divider()
-            Button("Recenter head") { model.recenterHead() }
-        }
-        Divider()
-        Button("Settings…") {
-            NSApp.activate(ignoringOtherApps: true)
-            openSettings()
-        }
-        .keyboardShortcut(",")
-        Button("Show Welcome…") { OnboardingController.shared.replay { openWindow(id: "main") } }
-        Button("Check for Updates…") { Updater.shared.checkForUpdates() }
-            .disabled(!Updater.shared.canCheckForUpdates)
-        Button("Quit") { NSApplication.shared.terminate(nil) }
     }
 }

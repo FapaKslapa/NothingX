@@ -23,7 +23,7 @@ final class LowBatteryRuleTests: XCTestCase {
     func testRearmsOnlyAboveThresholdPlusMargin() {
         var r = LowBatteryRule()
         XCTAssertTrue(r.evaluate(level: 15, charging: false, threshold: 20))
-        // Exactly threshold + margin (30) is not enough: it has to be strictly above.
+
         XCTAssertFalse(r.evaluate(level: 30, charging: false, threshold: 20))
         XCTAssertFalse(r.armed)
         XCTAssertFalse(r.evaluate(level: 31, charging: false, threshold: 20), "re-arms, but the level is fine")
@@ -66,12 +66,12 @@ final class LowBatteryRuleTests: XCTestCase {
         var r = LowBatteryRule()
         XCTAssertTrue(r.evaluate(level: 18, charging: false, threshold: 20))
         XCTAssertFalse(r.evaluate(level: 18, charging: false, threshold: 20))
-        // Switching to 10 re-arms, but 18 is above 10: nothing yet.
+
         XCTAssertFalse(r.evaluate(level: 18, charging: false, threshold: 10))
         XCTAssertTrue(r.armed)
         XCTAssertTrue(r.evaluate(level: 10, charging: false, threshold: 10))
         XCTAssertFalse(r.evaluate(level: 9, charging: false, threshold: 10))
-        // Back to 20 while at 9: the new choice is judged on its own and fires at once.
+
         XCTAssertTrue(r.evaluate(level: 9, charging: false, threshold: 20))
     }
 

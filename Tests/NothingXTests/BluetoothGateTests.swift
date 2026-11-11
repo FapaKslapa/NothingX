@@ -11,7 +11,7 @@ final class BluetoothGateTests: XCTestCase {
     }
 
     func testUnknownRawValueIsDenied() {
-        // A value a future macOS could add: the @unknown default must fail closed.
+
         let unknown = CBManagerAuthorization(rawValue: 9999)
         XCTAssertNotNil(unknown)
         XCTAssertEqual(BluetoothGate.gate(for: unknown!), .denied)

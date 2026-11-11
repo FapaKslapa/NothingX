@@ -22,12 +22,14 @@ fi
 SIGN_UPDATE="$SPARKLE_BIN/sign_update"
 [[ -x "$SIGN_UPDATE" ]] || { echo "error: sign_update not found in $SPARKLE_BIN" >&2; exit 69; }
 
-SIGNATURE=$("$SIGN_UPDATE" -p "$DMG")
+KEY_ARGS=()
+[[ -n "${SPARKLE_KEY_FILE:-}" ]] && KEY_ARGS=(--ed-key-file "$SPARKLE_KEY_FILE")
+SIGNATURE=$("$SIGN_UPDATE" "${KEY_ARGS[@]}" -p "$DMG")
 [[ -n "$SIGNATURE" ]] || { echo "error: sign_update returned no signature" >&2; exit 70; }
-"$SIGN_UPDATE" --verify "$DMG" "$SIGNATURE" >/dev/null || { echo "error: signature does not verify" >&2; exit 70; }
+"$SIGN_UPDATE" "${KEY_ARGS[@]}" --verify "$DMG" "$SIGNATURE" >/dev/null || { echo "error: signature does not verify" >&2; exit 70; }
 LENGTH=$(stat -f %z "$DMG")
 PUBDATE=$(LC_ALL=C date -u "+%a, %d %b %Y %H:%M:%S +0000")
-REPO="https://github.com/Senooy/nothing-x-mac"
+REPO="https://github.com/FapaKslapa/NothingX"
 URL="${DOWNLOAD_BASE:-$REPO/releases/download/v$VERSION}/NothingX-$VERSION.dmg"
 NOTES="$REPO/releases/tag/v$VERSION"
 

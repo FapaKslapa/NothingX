@@ -16,17 +16,20 @@
 	<array>
 		<string>en</string>
 		<string>fr</string>
+		<string>it</string>
 	</array>
 	<key>CFBundleName</key>
 	<string>Nothing X</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.4.0</string>
+	<string>0.5.0</string>
 	<key>CFBundleVersion</key>
-	<string>6</string>
+	<string>7</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.2</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Nothing X reads and controls what Spotify, Music and your browser are playing, to show it in the app.</string>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>Nothing X captures the Mac's audio to anchor spatial sound in front of you and to follow your head, and to equalize it when the headphone is plugged in by cable.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
@@ -34,9 +37,9 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>SUFeedURL</key>
-	<string>https://github.com/Senooy/nothing-x-mac/releases/latest/download/appcast.xml</string>
+	<string>https://github.com/FapaKslapa/NothingX/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>uts2dFuF4nnAe3nSSdqB50bZ4xBOGo9zgvydX76vVzU=</string>
+	<string>kQO7nqDfok/FAlTD6+ZaNN5TyXob45O3hJ0S9K3HxXw=</string>
 	<key>SUScheduledCheckInterval</key>
 	<integer>86400</integer>
 </dict>

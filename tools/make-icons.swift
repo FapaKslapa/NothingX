@@ -1,19 +1,7 @@
-// Generates the app icon (Resources/AppIcon.icns) and the menu bar glyph
-// (Resources/MenuBarIcon.png, @2x) for concept "A — Dot X".
-// Usage: swift tools/make-icons.swift   (run from the repository root)
 import AppKit
 import Foundation
 
 let red = CGColor(red: 0xD7 / 255, green: 0x19 / 255, blue: 0x21 / 255, alpha: 1)
-
-/// Dot X on a 7×7 grid: both diagonals, centre dot highlighted.
-func dotXPoints(pitch: CGFloat) -> [(x: CGFloat, y: CGFloat, center: Bool)] {
-    var pts: [(CGFloat, CGFloat, Bool)] = []
-    for i in 0..<7 { for j in 0..<7 where i == j || i + j == 6 {
-        pts.append((CGFloat(j - 3) * pitch, CGFloat(3 - i) * pitch, i == 3 && j == 3))
-    } }
-    return pts
-}
 
 func pngData(size: Int, draw: (CGContext, CGFloat) -> Void) -> Data {
     let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: size, pixelsHigh: size, bitsPerSample: 8,
@@ -27,7 +15,6 @@ func pngData(size: Int, draw: (CGContext, CGFloat) -> Void) -> Data {
     return rep.representation(using: .png, properties: [:])!
 }
 
-/// Squircle (superellipse, n = 5) like the macOS icon shape.
 func squircle(center: CGPoint, half: CGFloat) -> CGPath {
     let path = CGMutablePath()
     let n: CGFloat = 5, steps = 160
@@ -42,36 +29,64 @@ func squircle(center: CGPoint, half: CGFloat) -> CGPath {
     return path
 }
 
-func drawAppIcon(_ ctx: CGContext, _ size: CGFloat) {
-    let u = size / 1024                       // work on a 1024 grid
-    let center = CGPoint(x: size / 2, y: size / 2)
-    // Body: 824 / 1024 of the canvas, with a soft drop shadow, as in Apple's icon template.
-    ctx.saveGState()
-    ctx.setShadow(offset: CGSize(width: 0, height: -10 * u), blur: 22 * u, color: CGColor(gray: 0, alpha: 0.35))
-    ctx.addPath(squircle(center: center, half: 412 * u))
-    ctx.setFillColor(CGColor(gray: 0, alpha: 1))
-    ctx.fillPath()
-    ctx.restoreGState()
-    ctx.addPath(squircle(center: center, half: 412 * u))
-    ctx.setStrokeColor(CGColor(gray: 0.17, alpha: 1))
-    ctx.setLineWidth(3 * u)
-    ctx.strokePath()
-    // Dots.
-    let pitch = 80 * u, radius = 35 * u
-    for p in dotXPoints(pitch: pitch) {
-        ctx.setFillColor(p.center ? red : CGColor(gray: 1, alpha: 1))
-        ctx.fillEllipse(in: CGRect(x: center.x + p.x - radius, y: center.y + p.y - radius, width: radius * 2, height: radius * 2))
-    }
+func gradient(_ colors: [CGColor], _ locations: [CGFloat]) -> CGGradient {
+    CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors as CFArray, locations: locations)!
 }
 
-/// Template glyph: black on transparent; macOS tints it for light/dark menu bars.
+func xBar(_ ctx: CGContext, center: CGPoint, length: CGFloat, thickness: CGFloat, angle: CGFloat, u: CGFloat) {
+    ctx.saveGState()
+    ctx.translateBy(x: center.x, y: center.y)
+    ctx.rotate(by: angle)
+    let rect = CGRect(x: -length / 2, y: -thickness / 2, width: length, height: thickness)
+    let path = CGPath(roundedRect: rect, cornerWidth: thickness / 2, cornerHeight: thickness / 2, transform: nil)
+    ctx.setShadow(offset: CGSize(width: 0, height: -14 * u), blur: 30 * u, color: CGColor(gray: 0, alpha: 0.5))
+    ctx.addPath(path)
+    ctx.setFillColor(CGColor(gray: 1, alpha: 1))
+    ctx.fillPath()
+    ctx.setShadow(offset: .zero, blur: 0, color: nil)
+    ctx.addPath(path)
+    ctx.clip()
+    ctx.drawLinearGradient(gradient([CGColor(gray: 1, alpha: 0.98), CGColor(gray: 0.78, alpha: 0.9)], [0, 1]),
+                           start: CGPoint(x: 0, y: thickness / 2), end: CGPoint(x: 0, y: -thickness / 2), options: [])
+    ctx.restoreGState()
+}
+
+func drawAppIcon(_ ctx: CGContext, _ size: CGFloat) {
+    let u = size / 1024
+    let center = CGPoint(x: size / 2, y: size / 2)
+    let body = squircle(center: center, half: 412 * u)
+    ctx.saveGState()
+    ctx.setShadow(offset: CGSize(width: 0, height: -12 * u), blur: 26 * u, color: CGColor(gray: 0, alpha: 0.4))
+    ctx.addPath(body)
+    ctx.setFillColor(CGColor(gray: 0.05, alpha: 1))
+    ctx.fillPath()
+    ctx.restoreGState()
+    ctx.saveGState()
+    ctx.addPath(body)
+    ctx.clip()
+    ctx.drawRadialGradient(gradient([CGColor(gray: 0.30, alpha: 1), CGColor(gray: 0.09, alpha: 1), CGColor(gray: 0.02, alpha: 1)], [0, 0.55, 1]),
+                           startCenter: CGPoint(x: size * 0.36, y: size * 0.74), startRadius: 0,
+                           endCenter: CGPoint(x: size * 0.5, y: size * 0.5), endRadius: 620 * u, options: .drawsAfterEndLocation)
+    ctx.restoreGState()
+    ctx.addPath(body)
+    ctx.setStrokeColor(CGColor(gray: 1, alpha: 0.16))
+    ctx.setLineWidth(3 * u)
+    ctx.strokePath()
+    let length = 500 * u, thickness = 104 * u
+    xBar(ctx, center: center, length: length, thickness: thickness, angle: .pi / 4, u: u)
+    xBar(ctx, center: center, length: length, thickness: thickness, angle: -.pi / 4, u: u)
+    ctx.setFillColor(red)
+    ctx.fillEllipse(in: CGRect(x: center.x - 38 * u, y: center.y - 38 * u, width: 76 * u, height: 76 * u))
+}
+
 func drawGlyph(_ ctx: CGContext, _ size: CGFloat) {
-    let pitch = size / 7.4, radius = pitch * 0.46
-    let c = size / 2
-    ctx.setFillColor(CGColor(gray: 0, alpha: 1))
-    for p in dotXPoints(pitch: pitch) {
-        ctx.fillEllipse(in: CGRect(x: c + p.x - radius, y: c + p.y - radius, width: radius * 2, height: radius * 2))
-    }
+    let inset = size * 0.2
+    ctx.setStrokeColor(CGColor(gray: 0, alpha: 1))
+    ctx.setLineWidth(size * 0.15)
+    ctx.setLineCap(.round)
+    ctx.move(to: CGPoint(x: inset, y: inset)); ctx.addLine(to: CGPoint(x: size - inset, y: size - inset))
+    ctx.move(to: CGPoint(x: inset, y: size - inset)); ctx.addLine(to: CGPoint(x: size - inset, y: inset))
+    ctx.strokePath()
 }
 
 let fm = FileManager.default

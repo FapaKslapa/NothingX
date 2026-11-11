@@ -11,6 +11,7 @@ final class HeadphoneModel {
     var deviceName = "Nothing Headphone"
     var battery: Int?
     var charging = false
+    var batteryParts: [BatteryReading] = []
     var firmware: String?
     var serial: String?
     var ancRaw: UInt8?
@@ -21,10 +22,9 @@ final class HeadphoneModel {
     var bassBoostOn = false
     var bassBoostLevel: UInt8 = 6
     var gestures: [GestureBinding] = []
-    /// Inline status text (no toasts): `[OK]`, `[ERROR: …]`.
+
     var status = ""
 
-    // Mac-anchored spatial audio (own binaural renderer)
     var macAnchored = false
     var anchorDetail = ""
     var anchorSensitivity: Double = {
@@ -43,6 +43,8 @@ final class HeadphoneModel {
 
     private let notifier = NotificationCoordinator()
     private let transport = BluetoothLink()
+    let library = DeviceLibrary()
+    let nowPlaying = NowPlayingService()
     private var opCounter: UInt8 = 0
     private var pending: [UInt8: CheckedContinuation<[UInt8]?, Never>] = [:]
     private var batteryTimer: Timer?
@@ -61,21 +63,27 @@ final class HeadphoneModel {
         }
         if startLink { self.startLink() }
         if startUSBMonitor { self.startUSBMonitor() }
-        // The headphone can be changed from its own buttons or another device: poll the
-        // cheap settings every few seconds, the battery less often.
+
         batteryTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.poll() }
         }
         setUpSoftwareEQ()
     }
 
-    // MARK: Connection
-
-    /// Starts the Bluetooth transport once. Deferred by the onboarding so the macOS prompt appears on its Bluetooth step.
     func startLink() {
         guard !linkStarted else { return }
         linkStarted = true
         transport.start()
+        library.start()
+    }
+
+    func connectDevice(_ entry: DeviceLibrary.Entry) {
+        library.connect(entry)
+        transport.select(address: entry.address)
+    }
+
+    func useDevice(_ entry: DeviceLibrary.Entry) {
+        transport.select(address: entry.address)
     }
 
     private func linkChanged(_ state: BluetoothLink.State, _ name: String?) {
@@ -88,6 +96,7 @@ final class HeadphoneModel {
             for (_, cont) in pending { cont.resume(returning: nil) }
             pending.removeAll()
             battery = nil
+            batteryParts = []
             charging = false
             ancRaw = nil
             eqPreset = nil
@@ -116,7 +125,6 @@ final class HeadphoneModel {
         if frame.cmd == NT.Cmd.notifyHeadPose { headPose.ingest(frame.payload, now: Date.timeIntervalSinceReferenceDate) }
     }
 
-    /// Sends a command and waits for the reply carrying the same opId.
     func request(_ cmd: UInt16, _ payload: [UInt8] = []) async -> [UInt8]? {
         guard connection == .connected else { return nil }
         opCounter = opCounter == 255 ? 1 : opCounter + 1
@@ -134,8 +142,6 @@ final class HeadphoneModel {
             }
         }
     }
-
-    // MARK: Reads
 
     func refreshAll() async {
         await refreshInfo()
@@ -155,14 +161,14 @@ final class HeadphoneModel {
         await refreshANC()
         if let p = await request(NT.Cmd.readSpatial), let s = SpatialState.decode(p) { spatial = s }
         if !eqBusy, let p = await request(NT.Cmd.readEQPreset), let v = p.first, v != eqPreset { eqPreset = v; await refreshEQ() }
-        if pollTick % 6 == 0 { await refreshBattery() }
-        if pollTick % 6 == 3, deviceWrites == 0, !findPlaying { await refreshDeviceSettings() }   // 5 cheap reads, every ~30 s
+        if pollTick % 6 == 0 || DeviceKind(name: deviceName).isEarbuds { await refreshBattery() }
+        if pollTick % 6 == 3, deviceWrites == 0, !findPlaying { await refreshDeviceSettings() }
     }
 
     private func refreshInfo() async {
         if let p = await request(NT.Cmd.readFirmware) { firmware = String(decoding: p, as: UTF8.self) }
         if let p = await request(NT.Cmd.readDeviceInfo), p.count > 1 {
-            // Lines "6,<key>,<value>"; key 4 = serial number.
+
             let text = String(decoding: p.dropFirst(), as: UTF8.self)
             for line in text.split(separator: "\n") {
                 let parts = line.split(separator: ",", maxSplits: 2, omittingEmptySubsequences: false)
@@ -173,8 +179,11 @@ final class HeadphoneModel {
 
     func refreshBattery() async {
         guard let p = await request(NT.Cmd.readBattery), p.count >= 3 else { return }
-        battery = Int(p[2] & 0x7F)
-        charging = p[2] & 0x80 != 0
+        let readings = BatteryReading.decode(p)
+        batteryParts = readings
+        let worn = readings.filter { $0.part != .charger }.min { $0.level < $1.level } ?? readings.first
+        battery = worn?.level ?? Int(p[2] & 0x7F)
+        charging = worn?.charging ?? (p[2] & 0x80 != 0)
         notifier.batteryChanged(level: battery, charging: charging, deviceName: deviceName)
     }
 
@@ -182,8 +191,6 @@ final class HeadphoneModel {
         if let p = await request(NT.Cmd.readANC) { applyANC(p) }
     }
 
-    /// Reads the preset and the custom curve. When the device is on its built-in Balanced preset the
-    /// bars are shown flat; otherwise they show the device's custom curve.
     func refreshEQ(keepBars: Bool = false) async {
         if let p = await request(NT.Cmd.readEQPreset), let v = p.first { eqPreset = v }
         if let p = await request(NT.Cmd.readCustomEQ, [0]), let eq = EQProfile.decode(p), !keepBars {
@@ -206,7 +213,6 @@ final class HeadphoneModel {
         saveOriginalGesturesIfNeeded(p)
     }
 
-    /// Payload `01 <mode> 00 [02 <last level> 00]`.
     private func applyANC(_ p: [UInt8]) {
         guard p.count >= 2 else { return }
         ancRaw = p[1]
@@ -214,14 +220,10 @@ final class HeadphoneModel {
         if (1...4).contains(p[1]) { lastANCLevel = p[1] }
     }
 
-    // MARK: Writes
-
-    /// Write acknowledged: reply received, empty payload or `00` (F00F → `00`, F010/F050 → empty).
     private static func acked(_ r: [UInt8]?) -> Bool { r != nil && (r!.first ?? 0) == 0 }
 
     private var statusClear: Task<Void, Never>?
 
-    /// Inline status; success fades after a moment, errors stay a bit longer.
     private func report(_ ok: Bool, _ what: String) {
         status = ok ? "[OK]" : String(format: String(localized: "[ERROR: %@]"), what)
         statusClear?.cancel()
@@ -249,11 +251,8 @@ final class HeadphoneModel {
         }
     }
 
-    // MARK: Equalizer
-
     private static let customKey = "eq.custom.gains"
 
-    /// The user's own curve, kept locally so it survives selecting other presets.
     private var userCustomGains: [Float] {
         get {
             if let saved = UserDefaults.standard.array(forKey: Self.customKey) as? [Double], saved.count == 8 {
@@ -268,7 +267,6 @@ final class HeadphoneModel {
         gains.count == bands.count && zip(gains, bands).allSatisfy { abs($0 - $1.gain) < 0.05 }
     }
 
-    /// Which preset the bars currently show.
     var selectedPreset: EQPreset? {
         guard let raw = eqPreset, let eq = eqProfile else { return nil }
         if raw == EQPreset.deviceBalanced { return .balanced }
@@ -282,7 +280,6 @@ final class HeadphoneModel {
         }
     }
 
-    /// Picks a preset: the bars move right away, then the curve is sent to the headphone and read back.
     func selectPreset(_ preset: EQPreset) {
         if isWired { return softwareSelectPreset(preset) }
         guard eqProfile != nil else { return }
@@ -305,7 +302,6 @@ final class HeadphoneModel {
         }
     }
 
-    /// Edits a band locally; the write to the headphone is deferred while dragging.
     func setBandGain(_ index: Int, _ gain: Float) {
         if isWired { return softwareSetBandGain(index, gain) }
         guard eqProfile?.bands.indices.contains(index) == true else { return }
@@ -313,13 +309,10 @@ final class HeadphoneModel {
         eqProfile?.bands[index].gain = gain
     }
 
-    /// True while the user is adjusting the bars or a commit is on its way: nothing may overwrite them.
     private var eqBusy: Bool {
         eqCommitRunning || eqCommit != nil || Date().timeIntervalSince(eqEditedAt) < 3
     }
 
-    /// Sends the current bars as the Custom curve (called when a drag ends). Commits never overlap: edits
-    /// made while one is in flight are sent right after it, always with the latest bars.
     func commitCustomEQ() {
         if isWired { return softwareCommitCustomEQ() }
         guard let current = eqProfile else { return }
@@ -354,14 +347,9 @@ final class HeadphoneModel {
         commitCustomEQ()
     }
 
-    // MARK: EQ files (AutoEq / Equalizer APO)
-
-    /// Import warnings, shown under the EQ buttons (`status` is red unless it is "[OK]").
     var eqImportNote = ""
     private var eqNoteClear: Task<Void, Never>?
 
-    /// Applies a parametric EQ file to the custom curve (sent to the headphone and read back, like a
-    /// manual edit) and returns the warnings. An empty-handed import changes nothing.
     @discardableResult
     func importEQ(from text: String) -> [String] {
         if isWired { return softwareImportEQ(text) }
@@ -386,13 +374,11 @@ final class HeadphoneModel {
         return mapping.warnings
     }
 
-    /// The current custom curve as `ParametricEQ.txt`, or nil until it has been read.
     func exportEQ() -> String? {
         if isWired { return EQInterchange.export(softwareEQProfile) }
         return eqProfile.map(EQInterchange.export)
     }
 
-    /// For file read / write failures in the view.
     func reportEQFile(ok: Bool, _ what: String) { report(ok, what) }
 
     private func setEQImportNote(_ warnings: [String]) {
@@ -407,10 +393,6 @@ final class HeadphoneModel {
         }
     }
 
-    // MARK: Spatial audio
-
-    /// The firmware refuses spatial audio alongside bass boost or a non-flat EQ
-    /// (it acknowledges the write and ignores it), so those are cleared first.
     func setSpatial(on: Bool, headTracking: Bool) {
         spatial = SpatialState(on: on, headTracking: on && headTracking)
         Task {
@@ -431,11 +413,8 @@ final class HeadphoneModel {
         }
     }
 
-    // MARK: Gestures
-
     private var gestureBackupKey: String { "gestures.original.\(serial ?? "unknown")" }
 
-    /// Keeps the very first table read from the headphone so it can always be restored.
     private func saveOriginalGesturesIfNeeded(_ payload: [UInt8]) {
         let defaults = UserDefaults.standard
         if defaults.array(forKey: gestureBackupKey) == nil {
@@ -443,7 +422,6 @@ final class HeadphoneModel {
         }
     }
 
-    var hasGestureBackup: Bool { UserDefaults.standard.array(forKey: gestureBackupKey) != nil }
 
     var gesturesDifferFromOriginal: Bool {
         guard let saved = UserDefaults.standard.array(forKey: gestureBackupKey) as? [Int] else { return false }
@@ -473,10 +451,6 @@ final class HeadphoneModel {
         }
     }
 
-    // MARK: Mac-anchored spatial audio
-
-    /// Turns the app's own binaural renderer on or off. While on, the headphone's built-in spatial
-    /// processing is switched off so the effect is not applied twice.
     func setMacAnchored(_ on: Bool) {
         if on { leaveSoftwareEQForMacAnchor() }
         anchorWanted = on
@@ -491,10 +465,10 @@ final class HeadphoneModel {
             _ = await request(NT.Cmd.setSpatial, [0, 0])
             await refreshSpatial()
         }
-        // Start the sensor stream and wait for the first sample so "forward" is the current pose.
+
         headPose.reset()
         _ = await request(NT.Cmd.startHeadStream)
-        // Off the main thread: Core Audio blocks until the System Audio Recording prompt is answered.
+
         anchorDetail = String(localized: "Waiting for audio permission…")
         let engine = spatialEngine
         let failure: String? = await Task.detached(priority: .userInitiated) {
@@ -506,10 +480,10 @@ final class HeadphoneModel {
             status = String(format: String(localized: "[ERROR: %@]"), failure)
             return
         }
-        guard connection == .connected, anchorWanted else { engine.stop(); anchorDetail = ""; return }   // changed while waiting
+        guard connection == .connected, anchorWanted else { engine.stop(); anchorDetail = ""; return }
         macAnchored = true
         anchorDetail = String(localized: "Capturing system audio")
-        // The sensor stream sometimes does not start on the first request: ask again until samples arrive.
+
         Task {
             for attempt in 1...4 {
                 try? await Task.sleep(for: .seconds(2))
@@ -528,15 +502,14 @@ final class HeadphoneModel {
     private func anchorTick() {
         let a = headPose.orientation(now: Date.timeIntervalSinceReferenceDate, sensitivity: anchorSensitivity)
         anchorTicks += 1
-        if anchorTicks % 30 == 0 {   // twice a second: live feedback
+        if anchorTicks % 30 == 0 {
             let rate = (headPose.sampleCount - lastSampleCount) * 2
             lastSampleCount = headPose.sampleCount
             anchorDetail = rate == 0
                 ? String(localized: "No sensor data")
                 : String(format: String(localized: "Tracking · yaw %+.0f°"), headPose.current.yaw)
         }
-        // Axis conventions checked by ear: the listener yaw has to be the opposite of the sensor yaw
-        // (sensor + = head turned left), otherwise the sound slides the wrong way.
+
         spatialEngine.setListener(yaw: Float(-a.yaw), pitch: Float(a.pitch), roll: Float(-a.roll))
     }
 
@@ -548,20 +521,14 @@ final class HeadphoneModel {
         if !remember { anchorWanted = false }
     }
 
-    // MARK: Wired (USB)
-
-    /// The headphone is plugged in by its USB cable. It drops Bluetooth while the cable is in, so the
-    /// control link (noise control, battery, EQ, gestures, settings, head tracking) is unavailable.
     private(set) var usbPresent = false {
-        didSet { if oldValue != usbPresent { syncSoftwareEQ() } }   // plug / unplug starts or stops the software EQ
+        didSet { if oldValue != usbPresent { syncSoftwareEQ() } }
     }
 
-    /// Plugged in and not controllable over Bluetooth. Not a `Connection` case: the Bluetooth link code is unaffected.
     var isWired: Bool { usbPresent && connection != .connected }
 
     private let usbMonitor = USBHeadphoneMonitor()
 
-    /// Cheap and non-blocking: IOKit notifications on the main run loop, no polling.
     private func startUSBMonitor() {
         usbMonitor.onChange = { [weak self] present in self?.usbChanged(present) }
         usbMonitor.start()
@@ -569,35 +536,22 @@ final class HeadphoneModel {
 
     private func usbChanged(_ present: Bool) {
         usbPresent = present
-        // Show the serial number even though the Bluetooth link never ran (the USB descriptor carries the same one).
+
         if present, serial == nil { serial = usbMonitor.serial }
-        // The Mac-anchor renderer needs the Bluetooth sensor stream and output: stop it (the choice is remembered).
+
         if isWired { stopMacAnchor(remember: true) }
         WiredOutputController.shared.usbPresenceChanged(present)
     }
 
-    // MARK: Software EQ
-
-    // Wired (USB) mode: with the cable plugged in the headphone drops Bluetooth, so its own EQ is out of
-    // reach. The Mac then equalizes everything it plays (`EQAudioEngine`) on a local 8-band profile, and
-    // the EQ controls drive that profile instead of sending Bluetooth commands. Nothing here runs or
-    // changes while not wired. Like the Mac anchor it captures and mutes system audio, so the two are
-    // mutually exclusive.
-
-    /// There is no switch: like the headphone's own EQ, the software EQ simply follows the presets and
-    /// sliders. It runs only while wired and only when the curve actually changes the sound (a flat curve
-    /// needs no capture), and not after the system refused audio capture until the curve is touched again.
     var softwareEQEnabled: Bool {
         !softwareEQBlocked && softwareEQProfile.bands.contains { abs($0.gain) >= 0.05 }
     }
     private var softwareEQBlocked = false
 
-    /// Once the engine is running it stays up while wired even if the curve goes flat: stopping would pull the
-    /// capture away from under the music and cause an audible glitch, and a flat curve changes nothing.
     private var softwareEQWanted: Bool { softwareEQEnabled || softwareEQRunning || softwareEQStart != nil }
     private(set) var softwareEQRunning = false
     var softwareEQDetail = ""
-    /// The local curve shown and applied while wired (8 bands, 55 Hz … 13.2 kHz, ±12 dB), persisted.
+
     var softwareEQProfile: EQProfile = HeadphoneModel.savedSoftwareEQProfile()
     private let eqEngine = EQAudioEngine()
     private var softwareEQStart: Task<Void, Never>?
@@ -611,26 +565,22 @@ final class HeadphoneModel {
         return SoftwareEQ.profile(gains: EQPreset.balanced.gains!)
     }
 
-    /// Which EQ the equalizer controls drive right now.
-    var eqPath: EQPath { EQPath.active(isWired: isWired) }
 
     var softwareSelectedPreset: EQPreset { SoftwareEQ.preset(matching: softwareEQProfile.bands.map(\.gain)) }
 
-    /// Called once from `init`.
     private func setUpSoftwareEQ() {
         eqEngine.onDeviceLost = { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.softwareEQRunning = false
                 self.softwareEQDetail = ""
-                self.syncSoftwareEQ()   // still wired (device reset): starts again; unplugged: stays off
+                self.syncSoftwareEQ()
             }
         }
         observeWiredForSoftwareEQ()
         syncSoftwareEQ()
     }
 
-    /// Re-syncs whenever `isWired` changes (it is computed from observable state).
     private func observeWiredForSoftwareEQ() {
         withObservationTracking { _ = isWired } onChange: { [weak self] in
             Task { @MainActor in
@@ -640,10 +590,8 @@ final class HeadphoneModel {
         }
     }
 
-    /// Starts or stops the engine to match the choice, the cable and the Mac anchor. Safe to call any time.
-    /// `allowStop: false` while a slider is being dragged: passing through zero must not tear the engine down.
     func syncSoftwareEQ(allowStop: Bool = true) {
-        if !isWired { softwareEQBlocked = false }   // a new plug-in gets a fresh attempt
+        if !isWired { softwareEQBlocked = false }
         let active = softwareEQRunning || softwareEQStart != nil
         switch SoftwareEQPolicy.action(enabled: softwareEQWanted, wired: isWired,
                                        macAnchorActive: macAnchored, active: active) {
@@ -653,13 +601,11 @@ final class HeadphoneModel {
         }
     }
 
-    /// Called when the Mac anchor is turned on.
     private func leaveSoftwareEQForMacAnchor() {
         guard softwareEQRunning || softwareEQStart != nil else { return }
         stopSoftwareEQ()
     }
 
-    /// Core Audio may publish the USB device a moment after the cable is detected: wait for it a little.
     private func startSoftwareEQ() {
         softwareEQStart = Task {
             for _ in 0..<10 {
@@ -670,24 +616,23 @@ final class HeadphoneModel {
                     return
                 }
                 if let device = AudioDevices.usbOutputDevice(forSoftwareEQ: "nothing") {
-                    // Core Audio can block for as long as the System Audio Recording prompt is unanswered,
-                    // so the engine is started off the main thread and the window stays responsive.
+
                     let engine = eqEngine, bands = softwareEQProfile.bands
                     softwareEQDetail = String(localized: "Waiting for audio permission…")
                     let failure: String? = await Task.detached(priority: .userInitiated) {
                         do { try engine.start(device: device, bands: bands); return nil } catch { return error.localizedDescription }
                     }.value
                     if let failure {
-                        // Capture refused or routing failed: switch off rather than retry in a loop.
+
                         softwareEQBlocked = true
                         softwareEQDetail = ""
                         status = String(format: String(localized: "[ERROR: %@]"), failure)
                     } else if SoftwareEQPolicy.shouldRun(enabled: softwareEQWanted, wired: isWired, macAnchorActive: macAnchored) {
                         softwareEQRunning = true
                         softwareEQDetail = String(localized: "Equalizing system audio")
-                        eqEngine.setBands(softwareEQProfile.bands)   // pick up edits made while it was starting
+                        eqEngine.setBands(softwareEQProfile.bands)
                     } else {
-                        eqEngine.stop()   // turned off or unplugged while the permission prompt was open
+                        eqEngine.stop()
                         softwareEQDetail = ""
                     }
                     softwareEQStart = nil
@@ -706,7 +651,7 @@ final class HeadphoneModel {
     private func stopSoftwareEQ() {
         softwareEQStart?.cancel()
         softwareEQStart = nil
-        eqEngine.stop()   // destroys the tap: system audio comes back by itself
+        eqEngine.stop()
         softwareEQRunning = false
         softwareEQDetail = ""
     }
@@ -715,7 +660,7 @@ final class HeadphoneModel {
         var profile = softwareEQProfile
         for i in profile.bands.indices where i < gains.count { profile.bands[i].gain = SoftwareEQ.clampedGain(gains[i]) }
         if animated { withAnimation(.easeOut(duration: 0.3)) { softwareEQProfile = profile } } else { softwareEQProfile = profile }
-        softwareEQBlocked = false   // touching the curve retries after a refused capture
+        softwareEQBlocked = false
         eqEngine.setBands(profile.bands)
         syncSoftwareEQ(allowStop: animated)
     }
@@ -729,7 +674,6 @@ final class HeadphoneModel {
         saveSoftwareEQProfile()
     }
 
-    /// Live while dragging: the engine follows every step.
     private func softwareSetBandGain(_ index: Int, _ gain: Float) {
         guard softwareEQProfile.bands.indices.contains(index) else { return }
         var gains = softwareEQProfile.bands.map(\.gain)
@@ -737,11 +681,10 @@ final class HeadphoneModel {
         softwareApplyGains(gains, animated: false)
     }
 
-    /// End of a drag: the curve becomes the user's Custom curve (shared with the headphone's Custom preset).
     private func softwareCommitCustomEQ() {
         userCustomGains = softwareEQProfile.bands.map(\.gain)
         saveSoftwareEQProfile()
-        syncSoftwareEQ()   // a drag that ended on a flat curve stops the engine
+        syncSoftwareEQ()
     }
 
     private func softwareResetEQ() {
@@ -765,20 +708,16 @@ final class HeadphoneModel {
         return mapping.warnings
     }
 
-    // MARK: Device settings
-
     var lowLatency: Bool?
     var codec: AudioCodec?
     var dualConnection: Bool?
     var adaptiveANC: Bool?
     var inEarDetection: Bool?
-    /// True while a find-my-headphone pulse is playing.
+
     var findPlaying = false
 
-    /// Writes in flight: the slower poll skips device settings meanwhile so it cannot overwrite a fresh value.
     private var deviceWrites = 0
-    /// Set when a codec change is sent: the headphone then drops the link to renegotiate A2DP, so the
-    /// check happens after the reconnect (see `refreshDeviceSettings`).
+
     private var codecExpectation: (codec: AudioCodec, since: Date)?
     private var findTask: Task<Void, Never>?
     private static let findPulseSeconds = 2.0
@@ -817,7 +756,7 @@ final class HeadphoneModel {
     @discardableResult
     func refreshCodec() async -> AudioCodec? {
         guard let p = await request(NT.Cmd.readCodec) else { return nil }
-        let v = AudioCodec.decode(p)   // 1 and 3 are not meaningful here: shown as no selection
+        let v = AudioCodec.decode(p)
         codec = v
         return v
     }
@@ -844,7 +783,6 @@ final class HeadphoneModel {
         return v
     }
 
-    /// Write, then read back; `readBack` returns whether the headphone now holds the requested value.
     private func commitDeviceSetting(_ cmd: UInt16, _ payload: [UInt8], _ what: String,
                                      readBack: @escaping () async -> Bool) {
         deviceWrites += 1
@@ -877,7 +815,6 @@ final class HeadphoneModel {
         }
     }
 
-    /// Only feature `01` of the `C00E` table is ever written.
     func setInEarDetection(_ on: Bool) {
         inEarDetection = on
         commitDeviceSetting(NT.Cmd.setFeatureFlag, DeviceFeatureTable.encodeInEarDetection(on: on),
@@ -886,8 +823,6 @@ final class HeadphoneModel {
         }
     }
 
-    /// The headphone drops the RFCOMM link after a codec change (A2DP renegotiation): a missing reply
-    /// or a closed link is expected, not an error. The result is checked after the reconnect.
     func setCodec(_ newCodec: AudioCodec) {
         guard newCodec != codec else { return }
         codec = newCodec
@@ -898,7 +833,7 @@ final class HeadphoneModel {
             if connection == .connected {
                 var current = await refreshCodec()
                 if current != newCodec && connection == .connected {
-                    try? await Task.sleep(for: .seconds(4))   // the drop may come a moment after the ACK
+                    try? await Task.sleep(for: .seconds(4))
                     if connection == .connected { current = await refreshCodec() }
                 }
                 if connection == .connected, codecExpectation != nil {
@@ -910,14 +845,12 @@ final class HeadphoneModel {
         }
     }
 
-    /// Experimental: rings the headphone for a few seconds, then always sends off. Loud if worn:
-    /// the UI asks to take it off first.
     func startFindPulse() {
         guard connection == .connected, !findPlaying else { return }
         findPlaying = true
         findTask = Task {
             let on = Self.acked(await request(NT.Cmd.findHeadphone, FindMyHeadphone.payload(on: true)))
-            if on { try? await Task.sleep(for: .seconds(Self.findPulseSeconds)) }   // cancelled by stopFind
+            if on { try? await Task.sleep(for: .seconds(Self.findPulseSeconds)) }
             let off = Self.acked(await request(NT.Cmd.findHeadphone, FindMyHeadphone.payload(on: false)))
             findPlaying = false
             report(on && off, String(localized: "Find my headphone"))

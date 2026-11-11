@@ -2,8 +2,7 @@ import XCTest
 @testable import NothingX
 
 final class OnboardingFlowTests: XCTestCase {
-    /// A flow moved to `step` along the normal path: Bluetooth not asked yet for the Bluetooth step,
-    /// already allowed (so Welcome jumps to Connect) for every other step.
+
     private func flow(at step: OnboardingStep) -> OnboardingFlow {
         if step == .bluetooth {
             var f = OnboardingFlow(bluetooth: .notAsked)
@@ -17,8 +16,6 @@ final class OnboardingFlowTests: XCTestCase {
         }
         return f
     }
-
-    // MARK: 1. First launch
 
     func testFirstLaunchPath() {
         var f = OnboardingFlow(bluetooth: .notAsked)
@@ -37,17 +34,17 @@ final class OnboardingFlowTests: XCTestCase {
         f.handle(.next)
         XCTAssertEqual(f.step, .notifications)
         f.handle(.next)
+        XCTAssertEqual(f.step, .media)
+        f.handle(.next)
         XCTAssertEqual(f.step, .macAnchor)
         f.handle(.next)
         XCTAssertEqual(f.step, .done)
         XCTAssertNil(f.outcome)
-        XCTAssertEqual(f.completedSteps, [.welcome, .bluetooth, .connect, .notifications, .macAnchor])
+        XCTAssertEqual(f.completedSteps, [.welcome, .bluetooth, .connect, .notifications, .media, .macAnchor])
         f.handle(.next)
         XCTAssertEqual(f.outcome, .completed)
         XCTAssertEqual(f.completedSteps, Set(OnboardingStep.allCases))
     }
-
-    // MARK: 2. Bluetooth already allowed
 
     func testAlreadyAllowedSkipsBluetoothStep() {
         var f = OnboardingFlow(bluetooth: .allowed)
@@ -58,8 +55,6 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertTrue(f.completedSteps.contains(.welcome))
         XCTAssertFalse(f.completedSteps.contains(.connect))
     }
-
-    // MARK: 3. Next is ignored until access is allowed
 
     func testNextOnBluetoothIgnoredWhileWaitingOrDenied() {
         for state in [OnboardingFlow.Bluetooth.waiting, .denied] {
@@ -78,15 +73,13 @@ final class OnboardingFlowTests: XCTestCase {
 
     func testAllowBluetoothOnlyFromNotAskedOnBluetoothStep() {
         var f = OnboardingFlow(bluetooth: .notAsked)
-        f.handle(.allowBluetooth)                   // still on welcome
+        f.handle(.allowBluetooth)
         XCTAssertEqual(f.bluetooth, .notAsked)
         f.handle(.next)
         f.handle(.bluetoothChanged(.denied))
-        f.handle(.allowBluetooth)                   // already answered
+        f.handle(.allowBluetooth)
         XCTAssertEqual(f.bluetooth, .denied)
     }
-
-    // MARK: 4. Revoked while on Connect
 
     func testDeniedAtConnectRegressesThenAutoAdvancesAgain() {
         var f = flow(at: .connect)
@@ -111,10 +104,8 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(f.step, .connect)
     }
 
-    // MARK: 5. Later steps ignore Bluetooth
-
     func testBluetoothChangesIgnoredAfterConnect() {
-        for step in [OnboardingStep.notifications, .macAnchor, .done] {
+        for step in [OnboardingStep.notifications, .media, .macAnchor, .done] {
             var f = flow(at: step)
             for state in [OnboardingFlow.Bluetooth.denied, .waiting, .notAsked, .allowed] {
                 f.handle(.bluetoothChanged(state))
@@ -124,8 +115,6 @@ final class OnboardingFlowTests: XCTestCase {
             }
         }
     }
-
-    // MARK: 6. Skip
 
     func testSkipFromEveryStepEndsTheFlow() {
         for step in OnboardingStep.allCases {
@@ -149,8 +138,6 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(f.outcome, .completed)
     }
 
-    // MARK: 7. When the Bluetooth transport may start
-
     func testLinkShouldRun() {
         for state in [OnboardingFlow.Bluetooth.notAsked, .waiting, .denied, .allowed] {
             XCTAssertFalse(OnboardingFlow(bluetooth: state).linkShouldRun, "welcome \(state)")
@@ -173,7 +160,7 @@ final class OnboardingFlowTests: XCTestCase {
         allowed.handle(.bluetoothChanged(.allowed))
         XCTAssertTrue(allowed.linkShouldRun)
 
-        for step in [OnboardingStep.connect, .notifications, .macAnchor, .done] {
+        for step in [OnboardingStep.connect, .notifications, .media, .macAnchor, .done] {
             XCTAssertTrue(flow(at: step).linkShouldRun, "\(step)")
         }
 
@@ -182,20 +169,17 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertTrue(skipped.linkShouldRun)
     }
 
-    // MARK: 8. Presentation at launch
-
     func testShouldPresent() {
         XCTAssertTrue(OnboardingFlow.shouldPresent(completed: false, completedVersion: 0))
-        XCTAssertFalse(OnboardingFlow.shouldPresent(completed: true, completedVersion: 1))
+        XCTAssertTrue(OnboardingFlow.shouldPresent(completed: true, completedVersion: 1))
         XCTAssertTrue(OnboardingFlow.shouldPresent(completed: true, completedVersion: 0))
-        XCTAssertFalse(OnboardingFlow.shouldPresent(completed: true, completedVersion: 2))
+        XCTAssertTrue(OnboardingFlow.shouldPresent(completed: true, completedVersion: 2))
+        XCTAssertFalse(OnboardingFlow.shouldPresent(completed: true, completedVersion: 3))
     }
 
-    // MARK: 9. Steps
-
     func testSteps() {
-        XCTAssertEqual(OnboardingStep.allCases.count, 6)
-        XCTAssertEqual(OnboardingStep.allCases, [.welcome, .bluetooth, .connect, .notifications, .macAnchor, .done])
-        XCTAssertEqual(OnboardingStep.allCases.map(\.rawValue), Array(0..<6))
+        XCTAssertEqual(OnboardingStep.allCases.count, 7)
+        XCTAssertEqual(OnboardingStep.allCases, [.welcome, .bluetooth, .connect, .notifications, .media, .macAnchor, .done])
+        XCTAssertEqual(OnboardingStep.allCases.map(\.rawValue), Array(0..<7))
     }
 }
