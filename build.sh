@@ -11,7 +11,8 @@ mkdir -p "$APP/Contents/MacOS"
 cp "$BIN" "$APP/Contents/MacOS/NothingX"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 mkdir -p "$APP/Contents/Resources"
-cp -R Resources/*.lproj Resources/AppIcon.icns Resources/MenuBarIcon*.png "$APP/Contents/Resources/"
+cp -R Resources/*.lproj Resources/AppIcon.icns Resources/GlassBackground.jpg Resources/MenuBarIcon*.png "$APP/Contents/Resources/"
+cp Resources/Devices/*.png "$APP/Contents/Resources/" 2>/dev/null || true
 # Sparkle: embed the framework (ditto keeps its symlinks) and let the executable find it there.
 # The XPC services are only needed by sandboxed apps; this one is not, so drop them.
 mkdir -p "$APP/Contents/Frameworks"
