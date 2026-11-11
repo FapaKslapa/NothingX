@@ -1,19 +1,8 @@
 import Foundation
 
-// MARK: - Equalizer curve interchange
-//
-// Pure, side-effect-free import / export of equalizer curves:
-//  - AutoEq / Equalizer APO parametric text (`ParametricEQ.txt`):
-//      Preamp: -6.2 dB
-//      Filter 1: ON PK Fc 31 Hz Gain 2.4 dB Q 1.41
-//  - the single-line `GraphicEQ: 25 -3; 40 -2.5; ...` form (import only).
-// Nothing here touches the headphone: `HeadphoneModel.importEQ` / `exportEQ` do the wiring.
-
-/// Filter kinds the headphone understands (device band type 0 / 1 / 2).
 enum EQFilterType: Equatable {
     case lowShelf, peaking, highShelf
 
-    /// Band type byte of `EQBand`.
     var deviceType: UInt8 {
         switch self {
         case .lowShelf: 0
@@ -33,8 +22,8 @@ enum EQFilterType: Equatable {
 
 struct EQFilter: Equatable {
     var type: EQFilterType
-    var freq: Double   // Hz
-    var gain: Double   // dB
+    var freq: Double
+    var gain: Double
     var q: Double
 }
 
@@ -44,24 +33,21 @@ struct ParsedEQ: Equatable {
     var warnings: [String] = []
 }
 
-/// Result of fitting a `ParsedEQ` onto the device's fixed 8 bands.
 struct EQMapping {
     var profile: EQProfile
     var warnings: [String]
 }
 
 enum EQInterchange {
-    /// The custom EQ always has exactly this many bands.
+
     static let bandCount = 8
-    /// Default band centres of the custom EQ.
+
     static let defaultFrequencies: [Double] = [55, 110, 220, 440, 1320, 3300, 6600, 13200]
-    /// The headphone accepts ±12 dB per band.
+
     static let gainLimit = 12.0
-    /// Sanity bounds applied on import (app-side, not verified on the headphone).
+
     static let frequencyRange = 20.0...20000.0
     static let qRange = 0.1...20.0
-
-    // MARK: Parsing
 
     static func parse(_ text: String) -> ParsedEQ {
         var result = ParsedEQ()
@@ -89,7 +75,7 @@ enum EQInterchange {
                 }
                 continue
             }
-            // Channel:, Device:, Include:, Copy: ... are valid APO lines that carry no curve.
+
         }
 
         if graphicSeen {
@@ -105,14 +91,12 @@ enum EQInterchange {
         return result
     }
 
-    /// `Key: value` (case-insensitive key); returns the part after the colon.
     private static func value(of key: String, in line: String) -> String? {
         guard line.range(of: "^\(key)\\s*:", options: [.regularExpression, .caseInsensitive]) != nil,
               let colon = line.firstIndex(of: ":") else { return nil }
         return String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
     }
 
-    /// `Filter 3: ON PK ...` / `Filter: ON PK ...`; returns what follows the colon.
     private static func filterBody(_ line: String) -> String? {
         guard line.range(of: #"^Filter\s*\d*\s*:"#, options: [.regularExpression, .caseInsensitive]) != nil,
               let colon = line.firstIndex(of: ":") else { return nil }
@@ -120,7 +104,7 @@ enum EQInterchange {
     }
 
     private static func parseFilter(_ body: String, line: Int, warnings: inout [String]) -> EQFilter? {
-        // Optional ON / OFF, then the filter type, then key/value pairs.
+
         let words = body.split(whereSeparator: \.isWhitespace).map(String.init)
         var idx = 0
         if let first = words.first?.uppercased(), first == "ON" || first == "OFF" {
@@ -152,7 +136,7 @@ enum EQInterchange {
         if let v = firstNumber(#"\bQ\s*=?\s*"#, in: rest) {
             q = v
         } else if let bw = firstNumber(#"\bBW\s*(?:Oct\w*)?\s*=?\s*"#, in: rest), bw > 0 {
-            // Bandwidth in octaves to Q: Q = sqrt(2^BW) / (2^BW - 1).
+
             let p = pow(2, bw)
             q = p > 1 ? p.squareRoot() / (p - 1) : 0
         } else {
@@ -192,7 +176,6 @@ enum EQInterchange {
         return points.sorted { $0.freq < $1.freq }
     }
 
-    /// Linear interpolation of the gain in log-frequency; flat beyond the first and last point.
     private static func interpolate(_ points: [(freq: Double, gain: Double)], at f: Double) -> Double {
         guard let first = points.first, let last = points.last else { return 0 }
         if f <= first.freq { return first.gain }
@@ -206,17 +189,13 @@ enum EQInterchange {
         return last.gain
     }
 
-    // MARK: Number helpers
-
     private static let numberPattern = #"([-+]?(?:\d+(?:[.,]\d*)?|[.,]\d+))"#
 
-    /// Parses `1.5` and `1,5` alike.
     private static func parseNumber(_ s: String) -> Double? {
         guard let v = Double(s.replacingOccurrences(of: ",", with: ".")), v.isFinite else { return nil }
         return v
     }
 
-    /// The number that follows `prefix` (a regex) in `s`.
     private static func firstNumber(_ prefix: String, in s: String) -> Double? {
         guard let re = try? NSRegularExpression(pattern: prefix + numberPattern, options: [.caseInsensitive]) else { return nil }
         let range = NSRange(s.startIndex..., in: s)
@@ -225,19 +204,6 @@ enum EQInterchange {
         return parseNumber(String(s[r]))
     }
 
-    // MARK: Mapping to the device
-
-    /// Fits the filters onto the headphone's 8 bands, on top of `base` (which keeps its `profile`
-    /// id and `gain` field untouched).
-    ///
-    /// - Up to 8 usable filters: used as given, sorted by frequency, padded with 0 dB peaking bands at
-    ///   the default centres (preferring centres not already covered within a third of an octave).
-    /// - More than 8: keep the 8 with the largest |gain| (the original, unclamped value; ties keep the
-    ///   earlier filter), then sort by frequency. |gain| is a simple proxy for how audible a band is.
-    /// - Gains are clamped to ±12 dB.
-    /// - Preamp: **not applied**. `EQProfile.gain` is encoded in the custom EQ payload (`F050`) but
-    ///   what the firmware does with it is unverified, so folding a file's preamp into it could silently
-    ///   do nothing or do something unexpected. It is reported as a warning instead.
     static func map(_ parsed: ParsedEQ, base: EQProfile) -> EQMapping {
         var warnings = parsed.warnings
         var filters = parsed.filters
@@ -287,9 +253,6 @@ enum EQInterchange {
         return EQMapping(profile: profile, warnings: warnings)
     }
 
-    // MARK: Export
-
-    /// AutoEq-style `ParametricEQ.txt`.
     static func export(_ profile: EQProfile) -> String {
         var lines = ["Preamp: 0.0 dB"]
         for (i, b) in profile.bands.enumerated() {
@@ -305,7 +268,6 @@ enum EQInterchange {
         return lines.joined(separator: "\n") + "\n"
     }
 
-    /// Locale-independent decimal, trailing zeros trimmed down to `min` decimals, never "-0.0".
     private static func format(_ v: Double, min lo: Int, max hi: Int) -> String {
         var s = String(format: "%.\(hi)f", v)
         var decimals = hi

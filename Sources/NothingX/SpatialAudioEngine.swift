@@ -3,15 +3,6 @@ import AudioToolbox
 import CoreAudio
 import Foundation
 
-/// Renders the Mac's system audio as binaural sound anchored in front of the listener.
-///
-/// Pipeline: a Core Audio process tap captures everything every app plays (our own process excluded)
-/// and mutes it while we read it → two lock-protected ring buffers (left / right) → two mono
-/// `AVAudioSourceNode`s placed like virtual speakers → `AVAudioEnvironmentNode` (HRTF) whose listener
-/// orientation follows the head tracker → the headphone's output device.
-///
-/// Because the tap uses `CATapMutedWhenTapped`, the normal system output is silenced only while we are
-/// reading, so audio comes back by itself if the app stops or crashes.
 final class SpatialAudioEngine {
     enum Mode { case passthrough, hrtf }
 
@@ -22,7 +13,6 @@ final class SpatialAudioEngine {
 
     private(set) var isRunning = false
 
-    /// Tap + tap-only aggregate + IOProc (see `SystemAudioTap`).
     private let tap = SystemAudioTap(tapName: "Nothing X spatial tap", aggregateName: "Nothing X spatial",
                                      queueLabel: "nx.spatial.tap")
 
@@ -35,11 +25,8 @@ final class SpatialAudioEngine {
     private let ringL = AudioRing()
     private let ringR = AudioRing()
 
-    /// Virtual speakers: ±25° around the front at about one metre, like a laptop on a desk.
     private let speakerAzimuth: Float = 25
     private let speakerDistance: Float = 1.0
-
-    // MARK: Lifecycle
 
     func start(outputDeviceNameContaining name: String, mode: Mode = .hrtf) throws {
         guard !isRunning else { return }
@@ -56,7 +43,7 @@ final class SpatialAudioEngine {
             }
             try engine.start()
             isRunning = true
-            // The output device can change its sample rate or format (e.g. when the headset switches profile).
+
             configObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
                 guard let self, self.isRunning, !self.engine.isRunning else { return }
                 try? self.engine.start()
@@ -79,12 +66,9 @@ final class SpatialAudioEngine {
         isRunning = false
     }
 
-    /// Head orientation in degrees (yaw positive = turn left, like AVAudio3DAngularOrientation).
     func setListener(yaw: Float, pitch: Float, roll: Float) {
         environment.listenerAngularOrientation = AVAudio3DAngularOrientation(yaw: yaw, pitch: pitch, roll: roll)
     }
-
-    // MARK: Playback graph
 
     private func buildGraph(sampleRate: Double, outputDevice: AudioObjectID, mode: Mode) throws {
         try engine.outputNode.auAudioUnit.setDeviceID(outputDevice)
@@ -111,7 +95,7 @@ final class SpatialAudioEngine {
             engine.attach(environment)
             environment.outputType = .headphones
             environment.listenerPosition = AVAudio3DPoint(x: 0, y: 0, z: 0)
-            environment.distanceAttenuationParameters.rolloffFactor = 0   // keep level constant
+            environment.distanceAttenuationParameters.rolloffFactor = 0
             environment.reverbParameters.enable = true
             environment.reverbParameters.loadFactoryReverbPreset(.smallRoom)
             environment.reverbParameters.level = -20
@@ -132,14 +116,10 @@ final class SpatialAudioEngine {
     }
 }
 
-// MARK: - Ring buffer
-
-/// Single-producer / single-consumer ring of mono samples, guarded by an unfair lock.
-/// Keeps latency bounded: if the reader falls behind, the oldest samples are dropped.
 final class AudioRing {
-    private let capacity = 1 << 15          // 32768 frames
-    private let prefill = 1024              // wait for this much before starting playback
-    private let maxFill = 6144              // never let latency grow past this
+    private let capacity = 1 << 15
+    private let prefill = 1024
+    private let maxFill = 6144
     private let keepAfterDrop = 2048
     private let buffer: UnsafeMutablePointer<Float>
     private var readPos = 0, writePos = 0
@@ -178,14 +158,12 @@ final class AudioRing {
             produced = min(available, count)
             for i in 0..<produced { dst[i] = buffer[(readPos + i) & (capacity - 1)] }
             readPos += produced
-            if produced < count { playing = false }   // underrun: rebuffer
+            if produced < count { playing = false }
         }
         os_unfair_lock_unlock(lock)
         if produced < count { for i in produced..<count { dst[i] = 0 } }
     }
 }
-
-// MARK: - Audio device helpers
 
 enum AudioDevices {
     struct Device { let id: AudioObjectID; let uid: String; let name: String }
@@ -228,7 +206,6 @@ enum AudioDevices {
         return nil
     }
 
-    /// The Core Audio process object for a pid, used to keep our own output out of the tap.
     static func processObject(for pid: pid_t) -> AudioObjectID? {
         var addr = address(kAudioHardwarePropertyTranslatePIDToProcessObject)
         var pidValue = pid

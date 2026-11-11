@@ -2,7 +2,6 @@ import XCTest
 @testable import NothingX
 
 final class WiredModeTests: XCTestCase {
-    // MARK: USB matching
 
     func testMatchesNothingHeadphone() {
         XCTAssertTrue(USBHeadphoneMatch.matches(vendorID: 0xBE58, productName: "Nothing Headphone (1)"))
@@ -15,8 +14,6 @@ final class WiredModeTests: XCTestCase {
         XCTAssertFalse(USBHeadphoneMatch.matches(vendorID: 0xBE58, productName: nil))
         XCTAssertFalse(USBHeadphoneMatch.matches(vendorID: 0xBE58, productName: ""))
     }
-
-    // MARK: Presence tracking
 
     func testTrackerAttachAndDetach() {
         var t = USBPresenceTracker()
@@ -49,17 +46,15 @@ final class WiredModeTests: XCTestCase {
         XCTAssertFalse(t.isPresent)
     }
 
-    // MARK: Output switching policy
-
     private let speakers = "BuiltInSpeakers"
     private let usb = "NothingUSB"
 
     func testSwitchesOnPlugAndRestoresOnUnplug() {
         var p = WiredOutputPolicy()
         XCTAssertEqual(p.evaluate(enabled: true, usbPresent: true, headphoneUID: usb, defaultUID: speakers), .switchTo(uid: usb))
-        // Core Audio reports the new default: nothing more to do.
+
         XCTAssertEqual(p.evaluate(enabled: true, usbPresent: true, headphoneUID: usb, defaultUID: usb), .none)
-        // Unplug: the device is gone from Core Audio and macOS fell back to something else.
+
         XCTAssertEqual(p.evaluate(enabled: true, usbPresent: false, headphoneUID: nil, defaultUID: "Display"), .restore(uid: speakers))
         XCTAssertEqual(p.evaluate(enabled: true, usbPresent: false, headphoneUID: nil, defaultUID: speakers), .none)
     }
@@ -78,7 +73,7 @@ final class WiredModeTests: XCTestCase {
 
     func testWaitsForCoreAudioToListTheDevice() {
         var p = WiredOutputPolicy()
-        // The USB device is there but Core Audio has not published its output yet.
+
         XCTAssertEqual(p.evaluate(enabled: true, usbPresent: true, headphoneUID: nil, defaultUID: speakers), .none)
         XCTAssertEqual(p.evaluate(enabled: true, usbPresent: true, headphoneUID: usb, defaultUID: speakers), .switchTo(uid: usb))
     }
@@ -86,19 +81,19 @@ final class WiredModeTests: XCTestCase {
     func testUserChoiceWhilePluggedIsNotFoughtOrRestored() {
         var p = WiredOutputPolicy()
         _ = p.evaluate(enabled: true, usbPresent: true, headphoneUID: usb, defaultUID: speakers)
-        // The user picks AirPlay while the headphone is still listed.
+
         XCTAssertEqual(p.evaluate(enabled: true, usbPresent: true, headphoneUID: usb, defaultUID: "AirPlay"), .none)
-        // Further events do not switch back, and the unplug restores nothing.
+
         XCTAssertEqual(p.evaluate(enabled: true, usbPresent: true, headphoneUID: usb, defaultUID: "AirPlay"), .none)
         XCTAssertEqual(p.evaluate(enabled: true, usbPresent: false, headphoneUID: nil, defaultUID: "AirPlay"), .none)
-        // A later plug-in starts afresh.
+
         XCTAssertEqual(p.evaluate(enabled: true, usbPresent: true, headphoneUID: usb, defaultUID: "AirPlay"), .switchTo(uid: usb))
     }
 
     func testMacOSFallbackAtUnplugIsNotMistakenForAUserChoice() {
         var p = WiredOutputPolicy()
         _ = p.evaluate(enabled: true, usbPresent: true, headphoneUID: usb, defaultUID: speakers)
-        // Core Audio drops the device and changes the default before the USB notification: headphoneUID is nil.
+
         XCTAssertEqual(p.evaluate(enabled: true, usbPresent: true, headphoneUID: nil, defaultUID: "Display"), .none)
         XCTAssertEqual(p.evaluate(enabled: true, usbPresent: false, headphoneUID: nil, defaultUID: "Display"), .restore(uid: speakers))
     }
@@ -128,8 +123,6 @@ final class WiredModeTests: XCTestCase {
         p.switchFailed()
         XCTAssertEqual(p.evaluate(enabled: true, usbPresent: true, headphoneUID: usb, defaultUID: speakers), .switchTo(uid: usb))
     }
-
-    // MARK: Model
 
     @MainActor
     func testIsWiredIsFalseWithoutMonitor() {

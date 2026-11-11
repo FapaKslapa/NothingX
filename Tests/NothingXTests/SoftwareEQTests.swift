@@ -3,7 +3,6 @@ import XCTest
 @testable import NothingX
 
 final class SoftwareEQTests: XCTestCase {
-    // MARK: Band mapping
 
     func testFilterTypes() {
         XCTAssertEqual(SoftwareEQ.filterType(0), .lowShelf)
@@ -40,8 +39,6 @@ final class SoftwareEQTests: XCTestCase {
         XCTAssertLessThan(high.frequency, 24_000, "kept below Nyquist")
     }
 
-    // MARK: Headroom
-
     func testHeadroom() {
         XCTAssertEqual(SoftwareEQ.headroom([0, 0, 0, 0, 0, 0, 0, 0]), 0)
         XCTAssertEqual(SoftwareEQ.headroom([-3, -2, 0, -6, 0, 0, 0, -1]), 0, "cuts need no headroom")
@@ -50,8 +47,6 @@ final class SoftwareEQTests: XCTestCase {
         XCTAssertEqual(SoftwareEQ.headroom([30, 0]), -12, "uses the clamped gain")
         XCTAssertEqual(SoftwareEQ.headroom([]), 0)
     }
-
-    // MARK: Ramp
 
     func testRampStep() {
         let start: [Float] = [0, 0, 6, 0.5]
@@ -65,8 +60,6 @@ final class SoftwareEQTests: XCTestCase {
         XCTAssertEqual(ticks, 12, "a 12 dB jump takes 12 one-dB steps")
         XCTAssertEqual(SoftwareEQ.step([0], toward: [1, 2], maxStep: 1), [1, 2], "mismatched sizes jump to the target")
     }
-
-    // MARK: Local profile
 
     func testDefaultProfile() {
         let p = SoftwareEQ.profile(gains: EQPreset.balanced.gains!)
@@ -92,8 +85,6 @@ final class SoftwareEQTests: XCTestCase {
         XCTAssertEqual(SoftwareEQ.preset(matching: [1, 0, 0, 0, 0, 0, 0, 0]), .custom)
     }
 
-    // MARK: Which EQ, and when the engine runs
-
     func testActivePath() {
         XCTAssertEqual(EQPath.active(isWired: true), .software)
         XCTAssertEqual(EQPath.active(isWired: false), .hardware)
@@ -107,16 +98,16 @@ final class SoftwareEQTests: XCTestCase {
     }
 
     func testPolicyActions() {
-        // Plug with the EQ enabled → start; already starting / running → nothing.
+
         XCTAssertEqual(SoftwareEQPolicy.action(enabled: true, wired: true, macAnchorActive: false, active: false), .start)
         XCTAssertEqual(SoftwareEQPolicy.action(enabled: true, wired: true, macAnchorActive: false, active: true), .none)
-        // Unplug → stop, the choice stays so it resumes on the next plug.
+
         XCTAssertEqual(SoftwareEQPolicy.action(enabled: true, wired: false, macAnchorActive: false, active: true), .stop)
         XCTAssertEqual(SoftwareEQPolicy.action(enabled: true, wired: false, macAnchorActive: false, active: false), .none)
-        // Turned off while wired → stop.
+
         XCTAssertEqual(SoftwareEQPolicy.action(enabled: false, wired: true, macAnchorActive: false, active: true), .stop)
         XCTAssertEqual(SoftwareEQPolicy.action(enabled: false, wired: true, macAnchorActive: false, active: false), .none)
-        // Mac anchor running → stop.
+
         XCTAssertEqual(SoftwareEQPolicy.action(enabled: true, wired: true, macAnchorActive: true, active: true), .stop)
     }
 }

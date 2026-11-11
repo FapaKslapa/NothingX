@@ -9,8 +9,6 @@ final class EQInterchangeTests: XCTestCase {
         })
     }
 
-    // MARK: Parsing
-
     func testAutoEqFile() {
         let text = """
         Preamp: -6.2 dB
@@ -30,12 +28,12 @@ final class EQInterchangeTests: XCTestCase {
     func testQuirks() {
         let text = "\u{FEFF}Preamp:  -3,5\r\n"
             + "# comment\r\n"
-            + "Filter 1:   ON   PK   Fc   Hz\r\n"                      // no frequency value: skipped with a warning
-            + "Filter 2: ON PK Fc 250,5 Gain 1,5 Q 2\r\n"            // decimal commas, no units
-            + "Filter 3: OFF PK Fc 500 Hz Gain 5 dB Q 1\r\n"         // OFF is skipped silently
-            + "filter 4: on lsq fc 80hz gain -2db q 0.9\r\n"         // lower case, no spaces before units
-            + "Filter 5: ON PK Fc 1000 Hz Gain 3 dB BW Oct 1.0\r\n"  // bandwidth instead of Q
-            + "Filter 6: ON LP Fc 18000 Hz\r\n"                      // unknown type
+            + "Filter 1:   ON   PK   Fc   Hz\r\n"
+            + "Filter 2: ON PK Fc 250,5 Gain 1,5 Q 2\r\n"
+            + "Filter 3: OFF PK Fc 500 Hz Gain 5 dB Q 1\r\n"
+            + "filter 4: on lsq fc 80hz gain -2db q 0.9\r\n"
+            + "Filter 5: ON PK Fc 1000 Hz Gain 3 dB BW Oct 1.0\r\n"
+            + "Filter 6: ON LP Fc 18000 Hz\r\n"
             + "Channel: all\r\n"
         let p = EQInterchange.parse(text)
         XCTAssertEqual(p.preamp, -3.5)
@@ -43,7 +41,7 @@ final class EQInterchangeTests: XCTestCase {
         XCTAssertEqual(p.filters[0].freq, 250.5)
         XCTAssertEqual(p.filters[0].gain, 1.5)
         XCTAssertEqual(p.filters[1], EQFilter(type: .lowShelf, freq: 80, gain: -2, q: 0.9))
-        // BW 1 octave -> Q = sqrt(2) / 1
+
         XCTAssertEqual(p.filters[2].q, 2.0.squareRoot(), accuracy: 1e-9)
         XCTAssertEqual(p.warnings.count, 2)
     }
@@ -60,8 +58,6 @@ final class EQInterchangeTests: XCTestCase {
         }
     }
 
-    // MARK: Mapping
-
     func testFewerThanEightIsPaddedAndSorted() {
         let p = EQInterchange.parse("Filter 1: ON PK Fc 3000 Hz Gain 2 dB Q 1\nFilter 2: ON LSC Fc 60 Hz Gain -4 dB Q 0.7")
         let m = EQInterchange.map(p, base: base())
@@ -72,7 +68,7 @@ final class EQInterchangeTests: XCTestCase {
         XCTAssertEqual(m.profile.bands.filter { $0.gain != 0 }.count, 2)
         XCTAssertEqual(m.profile.bands.map(\.id), Array(0..<8))
         XCTAssertEqual(m.profile.bands.first { $0.freq == 60 }?.type, 0)
-        // Padding avoids the centres already covered by the file (55 ~ 60, 3300 ~ 3000).
+
         XCTAssertFalse(freqs.contains(55))
         XCTAssertFalse(freqs.contains(3300))
         XCTAssertTrue(m.warnings.isEmpty)
@@ -85,7 +81,7 @@ final class EQInterchangeTests: XCTestCase {
     }
 
     func testMoreThanEightKeepsLargestGains() {
-        // Gains 1...10 dB (alternating sign) at increasing frequencies: the two smallest must be dropped.
+
         let lines = (1...10).map { "Filter \($0): ON PK Fc \($0 * 100) Hz Gain \($0 % 2 == 0 ? -$0 : $0) dB Q 1" }
         let m = EQInterchange.map(EQInterchange.parse(lines.joined(separator: "\n")), base: base())
         XCTAssertEqual(m.profile.bands.count, 8)
@@ -99,8 +95,8 @@ final class EQInterchangeTests: XCTestCase {
         let m = EQInterchange.map(EQInterchange.parse(text), base: base())
         XCTAssertEqual(m.profile.bands.first { $0.freq == 100 }?.gain, 12)
         XCTAssertEqual(m.profile.bands.first { $0.freq == 200 }?.gain, -12)
-        XCTAssertEqual(m.warnings.count, 2)   // clamp + preamp
-        XCTAssertEqual(m.profile.gain, 0)     // the preamp is not folded into the device gain field
+        XCTAssertEqual(m.warnings.count, 2)
+        XCTAssertEqual(m.profile.gain, 0)
         XCTAssertEqual(m.profile.profile, 0)
     }
 
@@ -111,8 +107,6 @@ final class EQInterchangeTests: XCTestCase {
         XCTAssertEqual(p.filters[1].q, 1)
         XCTAssertEqual(p.warnings.count, 3)
     }
-
-    // MARK: Export and round trip
 
     func testExportFormat() {
         var profile = base()
@@ -151,10 +145,8 @@ final class EQInterchangeTests: XCTestCase {
         }
     }
 
-    // MARK: GraphicEQ
-
     func testGraphicEQSampling() {
-        // Flat -2 dB up to 100 Hz, then linear in log-frequency to +4 dB at 10 kHz, flat after.
+
         let p = EQInterchange.parse("GraphicEQ: 20 -2; 100 -2; 10000 4; 20000 4")
         XCTAssertEqual(p.filters.count, 8)
         XCTAssertEqual(p.filters.map(\.freq), EQInterchange.defaultFrequencies)
@@ -169,9 +161,9 @@ final class EQInterchangeTests: XCTestCase {
     func testGraphicEQQuirks() {
         let p = EQInterchange.parse("GraphicEQ: 25 -3,0; 40 -2,5; 63 -1;100 0 ; bogus; 16000 2")
         XCTAssertEqual(p.filters.count, 8)
-        // 55 Hz lies between the points at 40 (-2.5) and 63 (-1).
+
         XCTAssertEqual(p.filters[0].gain, -2.5 + 1.5 * log(55.0 / 40) / log(63.0 / 40), accuracy: 1e-9)
-        XCTAssertEqual(p.warnings.count, 2)   // unreadable point + sampling note
+        XCTAssertEqual(p.warnings.count, 2)
     }
 
     func testFiltersWinOverGraphicEQ() {
