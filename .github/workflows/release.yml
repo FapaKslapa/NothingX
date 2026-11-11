@@ -36,6 +36,7 @@ jobs:
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
+          if [[ -z "$SPARKLE_PRIVATE_KEY" ]]; then echo "SPARKLE_PRIVATE_KEY is not set: publishing without the update feed"; exit 0; fi
           version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist)
           build=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" Resources/Info.plist)
           echo "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/sparkle.key"
@@ -47,5 +48,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist)
-          gh release create "$GITHUB_REF_NAME" "build/NothingX-$version.dmg" build/appcast.xml \
-            --title "Nothing X $version" --generate-notes
+          files=("build/NothingX-$version.dmg")
+          [[ -f build/appcast.xml ]] && files+=(build/appcast.xml)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" --title "Nothing X $version" --generate-notes
+          fi
