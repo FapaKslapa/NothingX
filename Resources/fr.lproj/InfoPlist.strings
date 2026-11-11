@@ -1,3 +1,4 @@
 "NSBluetoothAlwaysUsageDescription" = "Nothing X se connecte à votre Nothing Headphone pour régler la réduction de bruit, l'égaliseur, l'audio spatial et lire la batterie.";
 "CFBundleDisplayName" = "Nothing X";
 "NSAudioCaptureUsageDescription" = "Nothing X capte l'audio du Mac pour ancrer le son spatial devant vous et suivre votre tête, et pour l'égaliser quand le casque est branché par câble.";
+"NSAppleEventsUsageDescription" = "Nothing X lit et contrôle ce que Spotify, Musique et votre navigateur lisent, pour l'afficher dans l'app.";
