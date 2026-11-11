@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Calm inline notice while the Bluetooth permission is missing; nothing otherwise.
-/// The controls below stay dimmed by the existing `connected` checks.
 struct BluetoothPermissionNotice: View {
     @Environment(HeadphoneModel.self) private var model
 
@@ -19,7 +17,7 @@ struct BluetoothPermissionNotice: View {
                 Text("Allow it in Privacy & Security › Bluetooth.")
                     .ntLabel(NTColor.disabled)
                 Button { BluetoothGate.openSettings() } label: {
-                    Text("[Open Bluetooth settings]").ntLabel(NTColor.secondary)
+                    ActionText("[Open Bluetooth settings]", NTColor.secondary)
                 }
                 .buttonStyle(.plain)
             }
