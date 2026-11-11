@@ -32,7 +32,7 @@ enum NowPlayingProviders {
         }
     }
 
-    private static func state(_ text: String) -> NowPlayingItem.State {
+    static func state(_ text: String) -> NowPlayingItem.State {
         text == "playing" ? .playing : text == "paused" ? .paused : .unknown
     }
 
@@ -41,11 +41,14 @@ enum NowPlayingProviders {
         let fields = AppleScriptRunner.strings(AppleScriptRunner.run("""
         tell application "Spotify"
             if player state is stopped then return {}
-            return {player state as text, name of current track, artist of current track, artwork url of current track}
+            set p to player position
+            set d to duration of current track
+            return {player state as text, name of current track, artist of current track, artwork url of current track, (round p) as text, (round (d / 1000)) as text}
         end tell
         """))
-        guard fields.count == 4, !fields[1].isEmpty else { return nil }
-        return NowPlayingItem(source: .spotify, title: fields[1], artist: fields[2], state: state(fields[0]), artworkURL: URL(string: fields[3]))
+        guard fields.count == 6, !fields[1].isEmpty else { return nil }
+        return NowPlayingItem(source: .spotify, title: fields[1], artist: fields[2], state: state(fields[0]), artworkURL: URL(string: fields[3]),
+                              position: Double(fields[4]), duration: Double(fields[5]))
     }
 
     private static func music(_ running: Set<String>) -> NowPlayingItem? {
@@ -53,11 +56,14 @@ enum NowPlayingProviders {
         let fields = AppleScriptRunner.strings(AppleScriptRunner.run("""
         tell application "Music"
             if player state is stopped then return {}
-            return {player state as text, name of current track, artist of current track}
+            set p to player position
+            set d to duration of current track
+            return {player state as text, name of current track, artist of current track, (round p) as text, (round d) as text}
         end tell
         """))
-        guard fields.count == 3, !fields[1].isEmpty else { return nil }
-        return NowPlayingItem(source: .music, title: fields[1], artist: fields[2], state: state(fields[0]), artworkURL: nil)
+        guard fields.count == 5, !fields[1].isEmpty else { return nil }
+        return NowPlayingItem(source: .music, title: fields[1], artist: fields[2], state: state(fields[0]), artworkURL: nil,
+                              position: Double(fields[3]), duration: Double(fields[4]))
     }
 
     private static func youtube(_ running: Set<String>) -> NowPlayingItem? {
@@ -65,8 +71,10 @@ enum NowPlayingProviders {
             let fields = AppleScriptRunner.strings(AppleScriptRunner.run(tabQuery(browser.app)))
             guard fields.count == 3, let videoID = videoID(fields[1]) else { continue }
             let title = fields[0].replacingOccurrences(of: " - YouTube", with: "")
-            return NowPlayingItem(source: .youtube, title: title, artist: "YouTube", state: state(fields[2]),
-                                  artworkURL: URL(string: "https://i.ytimg.com/vi/\(videoID)/hqdefault.jpg"))
+            let probe = parseProbe(fields[2])
+            return NowPlayingItem(source: .youtube, title: title, artist: "YouTube", state: probe.state,
+                                  artworkURL: URL(string: "https://i.ytimg.com/vi/\(videoID)/hqdefault.jpg"),
+                                  position: probe.position, duration: probe.duration)
         }
         return geckoYouTube(running)
     }
@@ -90,8 +98,8 @@ enum NowPlayingProviders {
     private static func tabQuery(_ app: String) -> String {
         let title = app == "Safari" ? "name" : "title"
         let probe = app == "Safari"
-            ? "do JavaScript \"(function(){var v=document.querySelector('video');return v?(v.paused?'paused':'playing'):'unknown'})()\" in t"
-            : "execute t javascript \"(function(){var v=document.querySelector('video');return v?(v.paused?'paused':'playing'):'unknown'})()\""
+            ? "do JavaScript \"(function(){var v=document.querySelector('video');return v?(v.paused?'paused':'playing')+','+Math.floor(v.currentTime)+','+Math.floor(v.duration||0):'unknown'})()\" in t"
+            : "execute t javascript \"(function(){var v=document.querySelector('video');return v?(v.paused?'paused':'playing')+','+Math.floor(v.currentTime)+','+Math.floor(v.duration||0):'unknown'})()\""
         return """
         tell application "\(app)"
             repeat with w in windows
@@ -110,12 +118,27 @@ enum NowPlayingProviders {
         """
     }
 
+    static func parseProbe(_ text: String) -> (state: NowPlayingItem.State, position: Double?, duration: Double?) {
+        let parts = text.split(separator: ",").map(String.init)
+        guard let first = parts.first else { return (.unknown, nil, nil) }
+        return (state(first), parts.count == 3 ? Double(parts[1]) : nil, parts.count == 3 ? Double(parts[2]) : nil)
+    }
+
     static func youtubeTitle(in windowTitles: [String]) -> String? {
         windowTitles.first { $0.contains(" - YouTube") }.flatMap { $0.components(separatedBy: " - YouTube").first }
     }
 
     static func videoID(_ url: String) -> String? {
         URLComponents(string: url)?.queryItems?.first { $0.name == "v" }?.value
+    }
+
+    static func seek(to seconds: Double, item: NowPlayingItem, running: Set<String>) {
+        let target = Int(seconds)
+        switch item.source {
+        case .spotify: _ = AppleScriptRunner.run("tell application \"Spotify\" to set player position to \(target)")
+        case .music: _ = AppleScriptRunner.run("tell application \"Music\" to set player position to \(target)")
+        case .youtube: runYouTubeScript("document.querySelector('video').currentTime=\(target)", running: running)
+        }
     }
 
     private static func controlYouTube(_ command: NowPlayingItem.Command, running: Set<String>) {
@@ -125,6 +148,10 @@ enum NowPlayingProviders {
         case .next: js = "var b=document.querySelector('.ytp-next-button');if(b)b.click()"
         case .previous: js = "document.querySelector('video').currentTime=0"
         }
+        runYouTubeScript(js, running: running)
+    }
+
+    private static func runYouTubeScript(_ js: String, running: Set<String>) {
         for browser in browsers where running.contains(browser.id) {
             let run = browser.app == "Safari" ? "do JavaScript \"\(js)\" in t" : "execute t javascript \"\(js)\""
             _ = AppleScriptRunner.run("""

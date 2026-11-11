@@ -5,6 +5,7 @@ import AppKit
 final class NowPlayingService {
     private(set) var items: [NowPlayingItem] = []
     private(set) var musicArtwork: NSImage?
+    private(set) var polledAt = Date()
     var selected: NowPlayingItem.Source?
 
     @ObservationIgnored private var timer: Timer?
@@ -31,6 +32,23 @@ final class NowPlayingService {
         guard viewers == 0 else { return }
         timer?.invalidate()
         timer = nil
+    }
+
+    func position(of item: NowPlayingItem, at date: Date) -> Double {
+        guard let position = item.position else { return 0 }
+        let elapsed = item.state == .playing ? date.timeIntervalSince(polledAt) : 0
+        return min(position + elapsed, item.duration ?? position)
+    }
+
+    func seek(to seconds: Double) {
+        guard let item = current, item.canSeek else { return }
+        let running = runningApps()
+        queue.async { NowPlayingProviders.seek(to: seconds, item: item, running: running) }
+        if let index = items.firstIndex(where: { $0.source == item.source }) {
+            items[index].position = seconds
+            polledAt = Date()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.poll() }
     }
 
     func canControl(_ item: NowPlayingItem) -> Bool {
@@ -66,6 +84,7 @@ final class NowPlayingService {
 
     private func apply(_ found: [NowPlayingItem], artwork: NSImage?, key: String) {
         busy = false
+        polledAt = Date()
         if found != items { items = found }
         if key != artworkKey {
             artworkKey = key
